@@ -1,4 +1,6 @@
 import unittest
+import sys
+from io import StringIO
 from rdkit import Chem
 from rdkit.Chem import rdFMCS
 
@@ -33,7 +35,7 @@ class BondMatchOrderMatrix:
         return self.MatchMatrix[i][j]
 
 class CompareAny(rdFMCS.MCSAtomCompare):
-    def compare(self, p, mol1, atom1, mol2, atom2):
+    def __call__(self, p, mol1, atom1, mol2, atom2):
         if (p.MatchChiralTag and not self.CheckAtomChirality(p, mol1, atom1, mol2, atom2)):
             return False
         if (p.MatchFormalCharge and not self.CheckAtomCharge(p, mol1, atom1, mol2, atom2)):
@@ -43,18 +45,18 @@ class CompareAny(rdFMCS.MCSAtomCompare):
         return True
 
 class CompareAnyHeavyAtom(CompareAny):
-    def compare(self, p, mol1, atom1, mol2, atom2):
+    def __call__(self, p, mol1, atom1, mol2, atom2):
         a1 = mol1.GetAtomWithIdx(atom1)
         a2 = mol2.GetAtomWithIdx(atom2)
         # Any atom, including H, matches another atom of the same type,  according to
         # the other flags
         if (a1.GetAtomicNum() == a2.GetAtomicNum() or
             (a1.GetAtomicNum() > 1 and a2.GetAtomicNum() > 1)):
-            return CompareAny.compare(self, p, mol1, atom1, mol2, atom2)
+            return CompareAny.__call__(self, p, mol1, atom1, mol2, atom2)
         return False
 
 class CompareElements(rdFMCS.MCSAtomCompare):
-    def compare(self, p, mol1, atom1, mol2, atom2):
+    def __call__(self, p, mol1, atom1, mol2, atom2):
         a1 = mol1.GetAtomWithIdx(atom1)
         a2 = mol2.GetAtomWithIdx(atom2)
         if (a1.GetAtomicNum() != a2.GetAtomicNum()):
@@ -70,7 +72,7 @@ class CompareElements(rdFMCS.MCSAtomCompare):
         return True
 
 class CompareIsotopes(rdFMCS.MCSAtomCompare):
-    def compare(self, p, mol1, atom1, mol2, atom2):
+    def __call__(self, p, mol1, atom1, mol2, atom2):
         a1 = mol1.GetAtomWithIdx(atom1)
         a2 = mol2.GetAtomWithIdx(atom2)
         if (a1.GetIsotope() != a2.GetIsotope()):
@@ -85,7 +87,7 @@ class CompareIsotopes(rdFMCS.MCSAtomCompare):
 
 class CompareOrder(rdFMCS.MCSBondCompare):
     match = BondMatchOrderMatrix(True)  # ignore Aromatization
-    def compare(self, p, mol1, bond1, mol2, bond2):
+    def __call__(self, p, mol1, bond1, mol2, bond2):
         b1 = mol1.GetBondWithIdx(bond1)
         b2 = mol2.GetBondWithIdx(bond2)
         t1 = b1.GetBondType()
@@ -99,7 +101,7 @@ class CompareOrder(rdFMCS.MCSBondCompare):
         return False
 
 class AtomCompareCompareIsInt(rdFMCS.MCSAtomCompare):
-    compare = 1
+    __call__ = 1
 
 class AtomCompareNoCompare(rdFMCS.MCSAtomCompare):
     pass
@@ -110,7 +112,7 @@ class AtomCompareUserData(rdFMCS.MCSAtomCompare):
         self._matchAnyHet = False
     def setMatchAnyHet(self, v):
         self._matchAnyHet = v
-    def compare(self, p, mol1, atom1, mol2, atom2):
+    def __call__(self, p, mol1, atom1, mol2, atom2):
         a1 = mol1.GetAtomWithIdx(atom1)
         a2 = mol2.GetAtomWithIdx(atom2)
         if (a1.GetAtomicNum() != a2.GetAtomicNum() and
@@ -129,7 +131,7 @@ class AtomCompareUserData(rdFMCS.MCSAtomCompare):
         return True
 
 class BondCompareCompareIsInt(rdFMCS.MCSBondCompare):
-    compare = 1
+    __call__ = 1
 
 class BondCompareNoCompare(rdFMCS.MCSBondCompare):
     pass
@@ -140,7 +142,7 @@ class BondCompareUserData(rdFMCS.MCSBondCompare):
         self.match = None
     def setIgnoreAromatization(self, v):
         self.match = BondMatchOrderMatrix(v)
-    def compare(self, p, mol1, bond1, mol2, bond2):
+    def __call__(self, p, mol1, bond1, mol2, bond2):
         b1 = mol1.GetBondWithIdx(bond1)
         b2 = mol2.GetBondWithIdx(bond2)
         t1 = b1.GetBondType()
@@ -154,7 +156,7 @@ class BondCompareUserData(rdFMCS.MCSBondCompare):
         return False
 
 class ProgressCallbackCallbackIsInt(rdFMCS.MCSProgress):
-    callback = 1
+    __call__ = 1
 
 class ProgressCallbackNoCallback(rdFMCS.MCSProgress):
     pass
@@ -164,7 +166,7 @@ class ProgressCallback(rdFMCS.MCSProgress):
         super().__init__()
         self.parent = parent
         self.callCount = 0
-    def callback(self, stat, params):
+    def __call__(self, stat, params):
         self.callCount += 1
         self.parent.assertTrue(isinstance(stat, rdFMCS.MCSProgressData))
         self.parent.assertTrue(hasattr(stat, "numAtoms"))
@@ -182,16 +184,12 @@ class ProgressCallback(rdFMCS.MCSProgress):
 class Common:
     @staticmethod
     def getParams(**kwargs):
-        have_kw = False
         params = rdFMCS.MCSParameters()
         for kw in ("AtomTyper", "BondTyper"):
-            try:
-                v = kwargs[kw]
-            except KeyError:
-                pass
-            else:
-                have_kw = True
-                setattr(params, kw, v())
+            v = kwargs.get(kw, None)
+            if v is not None:
+                v_instance = v()
+                setattr(params, kw, v_instance)
         return params
 
     @staticmethod
@@ -565,7 +563,30 @@ class Common:
             r = rdFMCS.FindMCS(ms, params)
         else:
             r = rdFMCS.FindMCS(ms, seedSmarts='C1OC1')
-        self.assertEqual(r.smartsString, "")
+        self.assertEqual(r.smartsString, "[#6]1-[#6]-[#6]-[#6]-1")
+        self.assertEqual(r.numAtoms, 4)
+        self.assertEqual(r.numBonds, 4)
+        if kwargs:
+            params = Common.getParams(**kwargs)
+            params.InitialSeed = 'C1OC1'
+            params.AtomCompareParameters.RingMatchesRingOnly = True
+            params.BondCompareParameters.RingMatchesRingOnly = True
+            r = rdFMCS.FindMCS(ms, params)
+        else:
+            r = rdFMCS.FindMCS(ms, seedSmarts='C1OC1', ringMatchesRingOnly=True)
+        self.assertEqual(r.smartsString, "[#6&R]1-&@[#6&R]-&@[#6&R]-&@[#6&R]-&@1")
+        self.assertEqual(r.numAtoms, 4)
+        self.assertEqual(r.numBonds, 4)
+        if kwargs:
+            params = Common.getParams(**kwargs)
+            params.InitialSeed = 'C1OC1'
+            params.BondCompareParameters.CompleteRingsOnly = True
+            r = rdFMCS.FindMCS(ms, params)
+        else:
+            r = rdFMCS.FindMCS(ms, seedSmarts='C1OC1', completeRingsOnly=True)
+        self.assertEqual(r.smartsString, "[#6]1-&@[#6]-&@[#6]-&@[#6]-&@1")
+        self.assertEqual(r.numAtoms, 4)
+        self.assertEqual(r.numBonds, 4)
 
     def test8MatchParams(self, **kwargs):
         smis = ("CCC1NC1", "CCC1N(C)C1", "CCC1OC1")
@@ -672,6 +693,100 @@ class Common:
         self.assertEqual(mcs.numAtoms, 3)
         self.assertEqual(mcs.numBonds, 3)
 
+    def test19MCS3d(self, **kwargs):
+        block1 = """
+     RDKit          3D
+
+ 17 17  0  0  0  0  0  0  0  0999 V2000
+    0.1592    0.8577    0.8639 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.9090    0.9385   -0.2218 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.1866   -0.4482   -0.7339 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.0705   -1.1345   -1.1348 O   0  0  0  0  0  0  0  0  0  0  0  0
+    0.8460   -1.2511   -0.0884 C   0  0  0  0  0  0  0  0  0  0  0  0
+    1.3508    0.1733    0.1788 C   0  0  1  0  0  0  0  0  0  0  0  0
+    1.6294    0.7269   -1.0491 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.2088    0.1739    1.6399 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.4334    1.8588    1.2198 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.8657    1.3295    0.1967 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.5185    1.5822   -1.0340 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.7155   -1.0290    0.0396 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.8809   -0.3833   -1.6049 H   0  0  0  0  0  0  0  0  0  0  0  0
+    1.6828   -1.9159   -0.3875 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.3276   -1.6370    0.8016 H   0  0  0  0  0  0  0  0  0  0  0  0
+    2.2158    0.0912    0.8546 H   0  0  0  0  0  0  0  0  0  0  0  0
+    1.6002    1.6926   -1.1014 H   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  1  0
+  2  3  1  0
+  3  4  1  0
+  4  5  1  0
+  5  6  1  0
+  6  7  1  0
+  6  1  1  0
+  1  8  1  0
+  1  9  1  0
+  2 10  1  0
+  2 11  1  0
+  3 12  1  0
+  3 13  1  0
+  5 14  1  0
+  5 15  1  0
+  6 16  1  1
+  7 17  1  0
+M  END
+
+
+"""
+        block2 = """
+     RDKit          3D
+
+ 17 17  0  0  0  0  0  0  0  0999 V2000
+    0.1592    0.8577    0.8639 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.9090    0.9385   -0.2218 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.1866   -0.4482   -0.7339 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.0705   -1.1345   -1.1348 O   0  0  0  0  0  0  0  0  0  0  0  0
+    0.8460   -1.2511   -0.0884 C   0  0  0  0  0  0  0  0  0  0  0  0
+    1.3508    0.1733    0.1788 C   0  0  2  0  0  0  0  0  0  0  0  0
+    2.4771    0.1924    0.9509 O   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.1638    0.2755    1.7318 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.4849    1.8825    1.0902 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.4598    1.5686   -1.0290 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.8337    1.3595    0.1902 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.8991   -0.3820   -1.5700 H   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.6394   -1.0265    0.1178 H   0  0  0  0  0  0  0  0  0  0  0  0
+    1.6816   -1.9167   -0.3664 H   0  0  0  0  0  0  0  0  0  0  0  0
+    0.3727   -1.5979    0.8445 H   0  0  0  0  0  0  0  0  0  0  0  0
+    1.4834    0.6899   -0.7827 H   0  0  0  0  0  0  0  0  0  0  0  0
+    2.2370    0.0336    1.8861 H   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  1  0
+  2  3  1  0
+  3  4  1  0
+  4  5  1  0
+  5  6  1  0
+  6  7  1  0
+  6  1  1  0
+  1  8  1  0
+  1  9  1  0
+  2 10  1  0
+  2 11  1  0
+  3 12  1  0
+  3 13  1  0
+  5 14  1  0
+  5 15  1  0
+  6 16  1  6
+  7 17  1  0
+M  END
+
+
+"""
+        m1 = Chem.MolFromMolBlock(block1, removeHs=False)
+        m2 = Chem.MolFromMolBlock(block2, removeHs=False)
+        ps = Common.getParams(**kwargs)
+        ps.AtomCompareParameters.MaxDistance = 1.0
+        mcs = rdFMCS.FindMCS([m1, m2], ps)
+        self.assertEqual(mcs.numAtoms, 14)
+        self.assertEqual(mcs.numBonds, 14)
+
+
 class TestCase(unittest.TestCase):
 
     def setUp(self):
@@ -685,12 +800,52 @@ class TestCase(unittest.TestCase):
             AtomTyper=CompareElements,
             BondTyper=CompareOrder)
 
+    # DEPRECATED: remove from here in release 2021.01
+    def test1PythonImplDeprecated(self):
+        atom_call = CompareElements.__call__
+        setattr(CompareElements, "compare", CompareElements.__call__)
+        delattr(CompareElements, "__call__")
+        bond_call = CompareOrder.__call__
+        setattr(CompareOrder, "compare", CompareOrder.__call__)
+        delattr(CompareOrder, "__call__")
+        Common.test1(self,
+            AtomTyper=CompareElements,
+            BondTyper=CompareOrder)
+        setattr(CompareElements, "__call__", atom_call)
+        delattr(CompareElements, "compare")
+        setattr(CompareOrder, "__call__", bond_call)
+        delattr(CompareOrder, "compare")
+
+    def test1PythonImplDeprecatedTypo(self):
+        atom_call = CompareElements.__call__
+        setattr(CompareElements, "comparx", CompareElements.__call__)
+        delattr(CompareElements, "__call__")
+        bond_call = CompareOrder.__call__
+        setattr(CompareOrder, "comparx", CompareOrder.__call__)
+        delattr(CompareOrder, "__call__")
+        self.assertRaises(TypeError, lambda self: Common.test1(self,
+            AtomTyper=CompareElements,
+            BondTyper=CompareOrder))
+        setattr(CompareElements, "__call__", atom_call)
+        delattr(CompareElements, "comparx")
+        setattr(CompareOrder, "__call__", bond_call)
+        delattr(CompareOrder, "comparx")
+    # DEPRECATED: remove until here in release 2021.01
+
     def test2(self):
         Common.test2(self)
 
     def test2PythonImpl(self):
         Common.test2(self,
             AtomTyper=CompareElements,
+            BondTyper=CompareOrder)
+
+    def test2PythonImplAtomTyperOnly(self):
+        Common.test2(self,
+            AtomTyper=CompareElements)
+
+    def test2PythonImplBondTyperOnly(self):
+        Common.test2(self,
             BondTyper=CompareOrder)
 
     def test3IsotopeMatch(self):
@@ -701,12 +856,28 @@ class TestCase(unittest.TestCase):
             AtomTyper=CompareElements,
             BondTyper=CompareOrder)
 
+    def test3IsotopeMatchPythonImplAtomTyperOnly(self):
+        Common.test3IsotopeMatch(self,
+            AtomTyper=CompareElements)
+
+    def test3IsotopeMatchPythonImplBondTyperOnly(self):
+        Common.test3IsotopeMatch(self,
+            BondTyper=CompareOrder)
+
     def test4RingMatches(self):
         Common.test4RingMatches(self)
 
     def test4RingMatchesPythonImpl(self):
         Common.test4RingMatches(self,
             AtomTyper=CompareElements,
+            BondTyper=CompareOrder)
+
+    def test4RingMatchesPythonImplAtomTyperOnly(self):
+        Common.test4RingMatches(self,
+            AtomTyper=CompareElements)
+
+    def test4RingMatchesPythonImplBondTyperOnly(self):
+        Common.test4RingMatches(self,
             BondTyper=CompareOrder)
 
     def test5AnyMatch(self):
@@ -717,12 +888,28 @@ class TestCase(unittest.TestCase):
             AtomTyper=CompareElements,
             BondTyper=CompareOrder)
 
+    def test5AnyMatchPythonImplAtomTyperOnly(self):
+        Common.test5AnyMatch(self,
+            AtomTyper=CompareElements)
+
+    def test5AnyMatchPythonImplBondTyperOnly(self):
+        Common.test5AnyMatch(self,
+            BondTyper=CompareOrder)
+
     def testAtomCompareAnyHeavyAtom(self):
         Common.testAtomCompareAnyHeavyAtom(self)
 
     def testAtomCompareAnyHeavyAtomPythonImpl(self):
         Common.testAtomCompareAnyHeavyAtom(self,
             AtomTyper=CompareElements,
+            BondTyper=CompareOrder)
+
+    def testAtomCompareAnyHeavyAtomPythonImplAtomTyperOnly(self):
+        Common.testAtomCompareAnyHeavyAtom(self,
+            AtomTyper=CompareElements)
+
+    def testAtomCompareAnyHeavyAtomPythonImplBondTyperOnly(self):
+        Common.testAtomCompareAnyHeavyAtom(self,
             BondTyper=CompareOrder)
 
     def testAtomCompareAnyHeavyAtom1(self):
@@ -733,12 +920,28 @@ class TestCase(unittest.TestCase):
             AtomTyper=CompareElements,
             BondTyper=CompareOrder)
 
+    def testAtomCompareAnyHeavyAtom1PythonImplAtomTyperOnly(self):
+        Common.testAtomCompareAnyHeavyAtom1(self,
+            AtomTyper=CompareElements)
+
+    def testAtomCompareAnyHeavyAtom1PythonImplBondTyperOnly(self):
+        Common.testAtomCompareAnyHeavyAtom1(self,
+            BondTyper=CompareOrder)
+
     def test6MatchValences(self):
         Common.test6MatchValences(self)
 
     def test6MatchValencesPythonImpl(self):
         Common.test6MatchValences(self,
             AtomTyper=CompareElements,
+            BondTyper=CompareOrder)
+
+    def test6MatchValencesPythonImplAtomTyperOnly(self):
+        Common.test6MatchValences(self,
+            AtomTyper=CompareElements)
+
+    def test6MatchValencesPythonImplBondTyperOnly(self):
+        Common.test6MatchValences(self,
             BondTyper=CompareOrder)
 
     def test7Seed(self):
@@ -749,12 +952,28 @@ class TestCase(unittest.TestCase):
             AtomTyper=CompareElements,
             BondTyper=CompareOrder)
 
+    def test7SeedPythonImplAtomTyperOnly(self):
+        Common.test7Seed(self,
+            AtomTyper=CompareElements)
+
+    def test7SeedPythonImplBondTyperOnly(self):
+        Common.test7Seed(self,
+            BondTyper=CompareOrder)
+
     def test8MatchParams(self):
         Common.test8MatchParams(self)
 
     def test8MatchParamsPythonImpl(self):
         Common.test8MatchParams(self,
             AtomTyper=CompareElements,
+            BondTyper=CompareOrder)
+
+    def test8MatchParamsPythonImplAtomTyperOnly(self):
+        Common.test8MatchParams(self,
+            AtomTyper=CompareElements)
+
+    def test8MatchParamsPythonImplBondTyperOnly(self):
+        Common.test8MatchParams(self,
             BondTyper=CompareOrder)
 
     def test9MatchCharge(self):
@@ -765,12 +984,28 @@ class TestCase(unittest.TestCase):
             AtomTyper=CompareElements,
             BondTyper=CompareOrder)
 
+    def test9MatchChargePythonImplAtomTyperOnly(self):
+        Common.test9MatchCharge(self,
+            AtomTyper=CompareElements)
+
+    def test9MatchChargePythonImplBondTyperOnly(self):
+        Common.test9MatchCharge(self,
+            BondTyper=CompareOrder)
+
     def test10MatchChargeAndParams(self):
         Common.test10MatchChargeAndParams(self)
 
     def test10MatchChargeAndParamsPythonImpl(self):
         Common.test10MatchChargeAndParams(self,
             AtomTyper=CompareElements,
+            BondTyper=CompareOrder)
+
+    def test10MatchChargeAndParamsPythonImplAtomTyperOnly(self):
+        Common.test10MatchChargeAndParams(self,
+            AtomTyper=CompareElements)
+
+    def test10MatchChargeAndParamsPythonImplBondTyperOnly(self):
+        Common.test10MatchChargeAndParams(self,
             BondTyper=CompareOrder)
 
     def test11Github2034(self):
@@ -781,14 +1016,22 @@ class TestCase(unittest.TestCase):
             AtomTyper=CompareElements,
             BondTyper=CompareOrder)
 
+    def test11Github2034PythonImplAtomTyperOnly(self):
+        Common.test11Github2034(self,
+            AtomTyper=CompareElements)
+
+    def test11Github2034PythonImplBondTyperOnly(self):
+        Common.test11Github2034(self,
+            BondTyper=CompareOrder)
+
     def test12MCSAtomCompareExceptions(self):
         ps = rdFMCS.MCSParameters()
         smis = ['CCCCC', 'CCC1CCCCC1']
         ms = [Chem.MolFromSmiles(x) for x in smis]
         self.assertRaises(TypeError, lambda ps: setattr(ps, "AtomTyper",
                           AtomCompareCompareIsInt()))
-        ps.AtomTyper = AtomCompareNoCompare()
-        self.assertRaises(TypeError, lambda ms, ps: rdFMCS.FindMCS(ms, ps))
+        self.assertRaises(TypeError, lambda ps: setattr(ps, "AtomTyper",
+                          AtomCompareNoCompare()))
 
     def test13MCSAtomCompareUserData(self):
         smis = ['CCOCCOC', 'CCNCCCC']
@@ -808,8 +1051,8 @@ class TestCase(unittest.TestCase):
         ms = [Chem.MolFromSmiles(x) for x in smis]
         self.assertRaises(TypeError, lambda ps: setattr(ps, "BondTyper",
                           BondCompareCompareIsInt()))
-        ps.BondTyper = BondCompareNoCompare()
-        self.assertRaises(TypeError, lambda ms, ps: rdFMCS.FindMCS(ms, ps))
+        self.assertRaises(TypeError, lambda ps: setattr(ps, "BondTyper",
+                          BondCompareNoCompare()))
 
     def test15MCSBondCompareUserData(self):
         smis = ['C1CC=CCC1', 'c1ccccc1']
@@ -830,8 +1073,8 @@ class TestCase(unittest.TestCase):
         ms = [Chem.MolFromSmiles(x) for x in smis]
         self.assertRaises(TypeError, lambda ps: setattr(ps, "ProgressCallback",
                           ProgressCallbackCallbackIsInt()))
-        ps.ProgressCallback = ProgressCallbackNoCallback()
-        self.assertRaises(TypeError, lambda ms, ps: rdFMCS.FindMCS(ms, ps))
+        self.assertRaises(TypeError, lambda ps: setattr(ps, "ProgressCallback",
+                          ProgressCallbackNoCallback()))
 
     def test17MCSProgressCallbackCancel(self):
         ps = rdFMCS.MCSParameters()
@@ -842,6 +1085,78 @@ class TestCase(unittest.TestCase):
         mcs = rdFMCS.FindMCS(ms, ps)
         self.assertTrue(mcs.canceled)
         self.assertEqual(ps.ProgressCallback.callCount, 3)
+
+    # DEPRECATED: remove from here in release 2021.01
+    def test17MCSProgressCallbackCancelDeprecated(self):
+        callback = ProgressCallback.__call__
+        setattr(ProgressCallback, "callback", ProgressCallback.__call__)
+        delattr(ProgressCallback, "__call__")
+        self.test17MCSProgressCallbackCancel()
+        setattr(ProgressCallback, "__call__", callback)
+        delattr(ProgressCallback, "callback")
+
+    def test17MCSProgressCallbackCancelDeprecatedTypo(self):
+        callback = ProgressCallback.__call__
+        setattr(ProgressCallback, "callbacx", ProgressCallback.__call__)
+        delattr(ProgressCallback, "__call__")
+        self.assertRaises(TypeError, self.test17MCSProgressCallbackCancel)
+        setattr(ProgressCallback, "__call__", callback)
+        delattr(ProgressCallback, "callbacx")
+    # DEPRECATED: remove until here in release 2021.01
+
+    def test18GitHub3693(self):
+        mols = [Chem.MolFromSmiles(smi) for smi in [
+                "Nc1ccc(O)cc1c1ccc2ccccc2c1", "Oc1cnc(NC2CCC2)c(c1)c1ccc2ccccc2c1"]]
+        params = rdFMCS.MCSParameters()
+        res = rdFMCS.FindMCS(mols, params)
+        self.assertEqual(res.numAtoms, 17)
+        self.assertEqual(res.numBonds, 18)
+        self.assertEqual(res.smartsString, "[#7]-,:[#6]:[#6](:[#6]:[#6](:[#6])-[#8])-[#6]1:[#6]:[#6]:[#6]2:[#6](:[#6]:1):[#6]:[#6]:[#6]:[#6]:2")
+
+        params = rdFMCS.MCSParameters()
+        params.BondCompareParameters.CompleteRingsOnly = True
+        res = rdFMCS.FindMCS(mols, params)
+        self.assertEqual(res.numAtoms, 11)
+        self.assertEqual(res.numBonds, 12)
+        self.assertEqual(res.smartsString, "[#6]-&!@[#6]1:&@[#6]:&@[#6]:&@[#6]2:&@[#6](:&@[#6]:&@1):&@[#6]:&@[#6]:&@[#6]:&@[#6]:&@2")
+
+        params = rdFMCS.MCSParameters()
+        params.AtomCompareParameters.CompleteRingsOnly = True
+        params.BondCompareParameters.CompleteRingsOnly = True
+        res = rdFMCS.FindMCS(mols, params)
+        self.assertEqual(res.numAtoms, 10)
+        self.assertEqual(res.numBonds, 11)
+        self.assertEqual(res.smartsString, "[#6&R]1:&@[#6&R]:&@[#6&R]:&@[#6&R]2:&@[#6&R](:&@[#6&R]:&@1):&@[#6&R]:&@[#6&R]:&@[#6&R]:&@[#6&R]:&@2")
+
+        params = rdFMCS.MCSParameters()
+        params.AtomCompareParameters.CompleteRingsOnly = True
+        # this will automatically be set to True
+        params.BondCompareParameters.CompleteRingsOnly = False
+        res = rdFMCS.FindMCS(mols, params)
+        self.assertEqual(res.numAtoms, 10)
+        self.assertEqual(res.numBonds, 11)
+        self.assertEqual(res.smartsString, "[#6&R]1:&@[#6&R]:&@[#6&R]:&@[#6&R]2:&@[#6&R](:&@[#6&R]:&@1):&@[#6&R]:&@[#6&R]:&@[#6&R]:&@[#6&R]:&@2")
+
+    def test19MCS3d(self):
+        Common.test19MCS3d(self)
+
+    def test20AtomCompareCompleteRingsOnly(self):
+        mols = [Chem.MolFromSmiles(smi) for smi in ["C1CCCC1C", "C1CCCC1C1CCCCC1"]]
+        params = rdFMCS.MCSParameters()
+        params.AtomCompareParameters.CompleteRingsOnly = True
+        res = rdFMCS.FindMCS(mols, params)
+        self.assertEqual(res.numAtoms, 5)
+        self.assertEqual(res.numBonds, 5)
+        self.assertEqual(res.smartsString, "[#6&R]1-&@[#6&R]-&@[#6&R]-&@[#6&R]-&@[#6&R]-&@1")
+
+        params = rdFMCS.MCSParameters()
+        params.AtomCompareParameters.CompleteRingsOnly = True
+        # this will automatically be set to True
+        params.BondCompareParameters.CompleteRingsOnly = False
+        res = rdFMCS.FindMCS(mols, params)
+        self.assertEqual(res.numAtoms, 5)
+        self.assertEqual(res.numBonds, 5)
+        self.assertEqual(res.smartsString, "[#6&R]1-&@[#6&R]-&@[#6&R]-&@[#6&R]-&@[#6&R]-&@1")
 
 if __name__ == "__main__":
     unittest.main()

@@ -43,77 +43,113 @@
 %typemap(throws, throws="org.RDKit.ChemicalReactionException") RDKit::ChemicalReactionException {
   jclass excep = jenv->FindClass("org/RDKit/ChemicalReactionException");
   if (excep)
-    jenv->ThrowNew(excep, $1.message());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
+%typemap(javacode) RDKit::ChemicalReactionException %{
+  public String getMessage() {
+    return what();
+  }
+%}
+
 
 // ===== ChemicalReactionParserException =====
 %typemap(javabase) RDKit::ChemicalReactionParserException "java.lang.RuntimeException";
 %typemap(throws, throws="org.RDKit.ChemicalReactionParserException") RDKit::ChemicalReactionParserException {
   jclass excep = jenv->FindClass("org/RDKit/ChemicalReactionParserException");
   if (excep)
-    jenv->ThrowNew(excep, $1.message());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
+%typemap(javacode) RDKit::ChemicalReactionParserException %{
+  public String getMessage() {
+    return what();
+  }
+%}
 
 // ===== ConformerException =====
 %typemap(javabase) RDKit::ConformerException "java.lang.RuntimeException";
 %typemap(throws, throws="org.RDKit.ConformerException") RDKit::ConformerException {
   jclass excep = jenv->FindClass("org/RDKit/ConformerException");
   if (excep)
-    jenv->ThrowNew(excep, $1.message());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
+%typemap(javacode) RDKit::ConformerException %{
+  public String getMessage() {
+    return what();
+  }
+%}
 
 // ===== MolPicklerException =====
 %typemap(javabase) RDKit::MolPicklerException "java.lang.RuntimeException";
 %typemap(throws, throws="org.RDKit.MolPicklerException") RDKit::MolPicklerException {
   jclass excep = jenv->FindClass("org/RDKit/MolPicklerException");
   if (excep)
-    jenv->ThrowNew(excep, $1.message());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
+%typemap(javacode) RDKit::MolPicklerException %{
+  public String getMessage() {
+    return what();
+  }
+%}
 
 // ===== MolSanitizeException =====
 %typemap(javabase) RDKit::MolSanitizeException "java.lang.RuntimeException";
 %typemap(throws, throws="org.RDKit.MolSanitizeException") RDKit::MolSanitizeException {
   jclass excep = jenv->FindClass("org/RDKit/MolSanitizeException");
   if (excep)
-    jenv->ThrowNew(excep, $1.message());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
+%typemap(javacode) RDKit::MolSanitizeException %{
+  public String getMessage() {
+    return what();
+  }
+%}
 
 // ===== SmilesParseException =====
 %typemap(javabase) RDKit::SmilesParseException "java.lang.RuntimeException";
 %typemap(throws, throws="org.RDKit.SmilesParseException") RDKit::SmilesParseException {
   jclass excep = jenv->FindClass("org/RDKit/SmilesParseException");
   if (excep)
-    jenv->ThrowNew(excep, $1.message());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
+%typemap(javacode) RDKit::SmilesParseException %{
+  public String getMessage() {
+    return what();
+  }
+%}
 
 // ===== KeyErrorException =====
 %typemap(javabase) KeyErrorException "java.lang.RuntimeException";
 %typemap(throws, throws="org.RDKit.KeyErrorException") KeyErrorException {
   jclass excep = jenv->FindClass("org/RDKit/KeyErrorException");
   if (excep)
-    jenv->ThrowNew(excep, $1.key());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
-%extend KeyErrorException {
-	std::string message() {
-		return "Unknown key: " + ($self)->key();
-	}
-}
+%typemap(javacode) RDKit::KeyErrorException %{
+  public String getMessage() {
+    return what();
+  }
+%}
 
 // ===== GenericRDKitException =====
 %typemap(javabase) RDKit::GenericRDKitException "java.lang.RuntimeException";
 %typemap(throws, throws="org.RDKit.GenericRDKitException") RDKit::GenericRDKitException {
   jclass excep = jenv->FindClass("org/RDKit/GenericRDKitException");
   if (excep)
-    jenv->ThrowNew(excep, $1.message());
+    jenv->ThrowNew(excep, $1.what());
   return $null;
 }
+%typemap(javacode) RDKit::GenericRDKitException %{
+  public String getMessage() {
+    return what();
+  }
+%}
 
 // Note that these files must follow the typemap declarations
 %include <RDGeneral/Exceptions.h>
@@ -124,27 +160,27 @@
      $action
   } catch (RDKit::ChemicalReactionException &e) {
     jclass clazz = jenv->FindClass("org/RDKit/ChemicalReactionException");
-    jenv->ThrowNew(clazz, e.message());
+    jenv->ThrowNew(clazz, e.what());
     return $null;
   } catch (RDKit::ChemicalReactionParserException &e) {
     jclass clazz = jenv->FindClass("org/RDKit/ChemicalReactionParserException");
-    jenv->ThrowNew(clazz, e.message());
+    jenv->ThrowNew(clazz, e.what());
     return $null;
   } catch (RDKit::ConformerException &e) {
     jclass clazz = jenv->FindClass("org/RDKit/ConformerException");
-    jenv->ThrowNew(clazz, e.message());
+    jenv->ThrowNew(clazz, e.what());
     return $null;
   } catch (RDKit::MolPicklerException &e) {
     jclass clazz = jenv->FindClass("org/RDKit/MolPicklerException");
-    jenv->ThrowNew(clazz, e.message());
+    jenv->ThrowNew(clazz, e.what());
     return $null;
   } catch (RDKit::MolSanitizeException &e) {
     jclass clazz = jenv->FindClass("org/RDKit/MolSanitizeException");
-    jenv->ThrowNew(clazz, e.message());
+    jenv->ThrowNew(clazz, e.what());
     return $null;
   } catch (RDKit::SmilesParseException &e) {
     jclass clazz = jenv->FindClass("org/RDKit/SmilesParseException");
-    jenv->ThrowNew(clazz, e.message());
+    jenv->ThrowNew(clazz, e.what());
     return $null;
   } catch (KeyErrorException &e) {
     jclass clazz = jenv->FindClass("org/RDKit/KeyErrorException");

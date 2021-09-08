@@ -1,4 +1,4 @@
-cmake_minimum_required( VERSION 2.8.9 )
+cmake_minimum_required( VERSION 3.5 )
 
 project(RDKitSV)
 
@@ -7,7 +7,8 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${RDBASE}/Code/cmake/Modules")
 
 # note that if you haven't installed/built the toolkit with CoordGen, you'll
 # have problems with this.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall  -std=c++11 -DRDK_BUILD_COORDGEN_SUPPORT=ON" )
+add_definitions("-DRDK_BUILD_COORDGEN_SUPPORT=ON")
+add_compile_options(-Wall)
 
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_MULTITHREADED OFF)

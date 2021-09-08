@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2003-2008 Greg Landrum and Rational Discovery LLC
+// Copyright (c) 2003-2020 Greg Landrum and Rational Discovery LLC
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -8,8 +8,8 @@
 //  of the RDKit source tree.
 //
 #include <RDGeneral/export.h>
-#ifndef __RD_SETQUERY_H__
-#define __RD_SETQUERY_H__
+#ifndef RD_SETQUERY_H
+#define RD_SETQUERY_H
 #include <set>
 #include "Query.h"
 #include <sstream>
@@ -22,7 +22,7 @@ namespace Queries {
 //!
 template <class MatchFuncArgType, class DataFuncArgType = MatchFuncArgType,
           bool needsConversion = false>
-class SetQuery
+class RDKIT_QUERY_EXPORT SetQuery
     : public Query<MatchFuncArgType, DataFuncArgType, needsConversion> {
  public:
   typedef std::set<MatchFuncArgType> CONTAINER_TYPE;
@@ -53,6 +53,7 @@ class SetQuery
     }
     res->setNegation(this->getNegation());
     res->d_description = this->d_description;
+    res->d_queryType = this->d_queryType;
     return res;
   };
 

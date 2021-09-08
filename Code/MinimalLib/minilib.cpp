@@ -26,6 +26,8 @@
 #include <GraphMol/Descriptors/MolDescriptors.h>
 #include <GraphMol/Fingerprints/MorganFingerprints.h>
 #include <GraphMol/Depictor/RDDepictor.h>
+#include <GraphMol/CIPLabeler/CIPLabeler.h>
+#include <GraphMol/Abbreviations/Abbreviations.h>
 #include <DataStructs/BitOps.h>
 
 #include <INCHI-API/inchi.h>
@@ -38,12 +40,79 @@ namespace rj = rapidjson;
 
 using namespace RDKit;
 
+std::string process_details(const std::string &details, unsigned int &width,
+                            unsigned int &height, int &offsetx, int &offsety,
+                            std::string &legend, std::vector<int> &atomIds,
+                            std::vector<int> &bondIds) {
+  rj::Document doc;
+  doc.Parse(details.c_str());
+  if (!doc.IsObject()) return "Invalid JSON";
+
+  if (doc.HasMember("atoms")) {
+    if (!doc["atoms"].IsArray()) {
+      return "JSON doesn't contain 'atoms' field, or it is not an array";
+    }
+    for (const auto &molval : doc["atoms"].GetArray()) {
+      if (!molval.IsInt()) return ("Atom IDs should be integers");
+      atomIds.push_back(molval.GetInt());
+    }
+  }
+  if (doc.HasMember("bonds")) {
+    if (!doc["bonds"].IsArray()) {
+      return "JSON contain 'bonds' field, but it is not an array";
+    }
+    for (const auto &molval : doc["bonds"].GetArray()) {
+      if (!molval.IsInt()) return ("Bond IDs should be integers");
+      bondIds.push_back(molval.GetInt());
+    }
+  }
+
+  if (doc.HasMember("width")) {
+    if (!doc["width"].IsUint()) {
+      return "JSON contains 'width' field, but it is not an unsigned int";
+    }
+    width = doc["width"].GetUint();
+  }
+
+  if (doc.HasMember("height")) {
+    if (!doc["height"].IsUint()) {
+      return "JSON contains 'height' field, but it is not an unsigned int";
+    }
+    height = doc["height"].GetUint();
+  }
+
+  if (doc.HasMember("offsetx")) {
+    if (!doc["offsetx"].IsInt()) {
+      return "JSON contains 'offsetx' field, but it is not an int";
+    }
+    offsetx = doc["offsetx"].GetInt();
+  }
+
+  if (doc.HasMember("offsety")) {
+    if (!doc["offsety"].IsInt()) {
+      return "JSON contains 'offsety' field, but it is not an int";
+    }
+    offsety = doc["offsety"].GetInt();
+  }
+
+  if (doc.HasMember("legend")) {
+    if (!doc["legend"].IsString()) {
+      return "JSON contains 'legend' field, but it is not a string";
+    }
+    legend = doc["legend"].GetString();
+  }
+
+  return "";
+}
+
 namespace {
-ROMol *mol_from_input(const std::string &input) {
+RWMol *mol_from_input(const std::string &input) {
   RWMol *res = nullptr;
   if (input.find("M  END") != std::string::npos) {
     bool sanitize = false;
-    res = MolBlockToMol(input, sanitize);
+    bool removeHs = true;
+    bool strictParsing = false;
+    res = MolBlockToMol(input, sanitize, removeHs, strictParsing);
   } else {
     SmilesParserParams ps;
     ps.sanitize = false;
@@ -61,11 +130,13 @@ ROMol *mol_from_input(const std::string &input) {
   return res;
 }
 
-ROMol *qmol_from_input(const std::string &input) {
+RWMol *qmol_from_input(const std::string &input) {
   RWMol *res = nullptr;
   if (input.find("M  END") != std::string::npos) {
     bool sanitize = false;
-    res = MolBlockToMol(input, sanitize);
+    bool removeHs = true;
+    bool strictParsing = false;
+    res = MolBlockToMol(input, sanitize, removeHs, strictParsing);
   } else {
     res = SmartsToMol(input);
   }
@@ -73,32 +144,27 @@ ROMol *qmol_from_input(const std::string &input) {
 }
 
 std::string svg_(const ROMol &m, unsigned int w, unsigned int h,
-                 const std::vector<unsigned int> *atomIds = nullptr,
-                 const std::vector<unsigned int> *bondIds = nullptr) {
+                 const std::string &details = "") {
+  std::vector<int> atomIds;
+  std::vector<int> bondIds;
+  std::string legend = "";
+  int offsetx = 0, offsety = 0;
+  if (!details.empty()) {
+    auto problems = process_details(details, w, h, offsetx, offsety, legend,
+                                    atomIds, bondIds);
+    if (!problems.empty()) {
+      return problems;
+    }
+  }
+
   MolDraw2DSVG drawer(w, h);
-  std::vector<int> *highlight_atoms = nullptr;
-  if (atomIds && atomIds->size()) {
-    highlight_atoms = new std::vector<int>;
-    highlight_atoms->reserve(atomIds->size());
-    for (auto ai : *atomIds) {
-      highlight_atoms->push_back(ai);
-    }
+  if (!details.empty()) {
+    MolDraw2DUtils::updateDrawerParamsFromJSON(drawer, details);
   }
+  drawer.setOffset(offsetx, offsety);
 
-  std::vector<int> *highlight_bonds = nullptr;
-  if (bondIds && bondIds->size()) {
-    highlight_bonds = new std::vector<int>;
-    highlight_bonds->reserve(bondIds->size());
-    for (auto ai : *bondIds) {
-      highlight_bonds->push_back(ai);
-    }
-  }
-
-  MolDraw2DUtils::prepareAndDrawMolecule(drawer, m, "", highlight_atoms,
-                                         highlight_bonds);
+  MolDraw2DUtils::prepareAndDrawMolecule(drawer, m, legend, &atomIds, &bondIds);
   drawer.finishDrawing();
-  delete highlight_atoms;
-  delete highlight_bonds;
 
   return drawer.getDrawingText();
 }
@@ -108,6 +174,10 @@ std::string JSMol::get_smiles() const {
   if (!d_mol) return "";
   return MolToSmiles(*d_mol);
 }
+std::string JSMol::get_cxsmiles() const {
+  if (!d_mol) return "";
+  return MolToCXSmiles(*d_mol);
+}
 std::string JSMol::get_svg(unsigned int w, unsigned int h) const {
   if (!d_mol) return "";
   return svg_(*d_mol, w, h);
@@ -115,47 +185,11 @@ std::string JSMol::get_svg(unsigned int w, unsigned int h) const {
 std::string JSMol::get_svg_with_highlights(const std::string &details) const {
   if (!d_mol) return "";
 
-  rj::Document doc;
-  doc.Parse(details.c_str());
-  if (!doc.IsObject()) return "Invalid JSON";
-
-  std::vector<unsigned int> atomIds;
-  if (!doc.HasMember("atoms") || !doc["atoms"].IsArray()) {
-    return "JSON doesn't contain 'atoms' field, or it is not an array";
-  }
-  for (const auto &molval : doc["atoms"].GetArray()) {
-    if (!molval.IsInt()) return ("Atom IDs should be integers");
-    atomIds.push_back(static_cast<unsigned int>(molval.GetInt()));
-  }
-  std::vector<unsigned int> bondIds;
-  if (doc.HasMember("bonds")) {
-    if (!doc["bonds"].IsArray()) {
-      return "JSON contain 'bonds' field, but it is not an array";
-    }
-    for (const auto &molval : doc["bonds"].GetArray()) {
-      if (!molval.IsInt()) return ("Bond IDs should be integers");
-      bondIds.push_back(static_cast<unsigned int>(molval.GetInt()));
-    }
-  }
-
   unsigned int w = d_defaultWidth;
-  if (doc.HasMember("width")) {
-    if (!doc["width"].IsUint()) {
-      return "JSON contains 'width' field, but it is not an unsigned int";
-    }
-    w = doc["width"].GetUint();
-  }
-
   unsigned int h = d_defaultHeight;
-  if (doc.HasMember("height")) {
-    if (!doc["height"].IsUint()) {
-      return "JSON contains 'height' field, but it is not an unsigned int";
-    }
-    h = doc["height"].GetUint();
-  }
-
-  return svg_(*d_mol, w, h, &atomIds, &bondIds);
+  return svg_(*d_mol, w, h, details);
 }
+
 std::string JSMol::get_inchi() const {
   if (!d_mol) return "";
   ExtraInchiReturnValues rv;
@@ -164,6 +198,10 @@ std::string JSMol::get_inchi() const {
 std::string JSMol::get_molblock() const {
   if (!d_mol) return "";
   return MolToMolBlock(*d_mol);
+}
+std::string JSMol::get_v3Kmolblock() const {
+  if (!d_mol) return "";
+  return MolToV3KMolBlock(*d_mol);
 }
 
 namespace {
@@ -178,8 +216,13 @@ void get_sss_json(const ROMol *d_mol, const ROMol *q_mol,
 
   rj::Value rjBonds(rj::kArrayType);
   for (const auto qbond : q_mol->bonds()) {
-    unsigned int idx1 = match[qbond->getBeginAtomIdx()].second;
-    unsigned int idx2 = match[qbond->getEndAtomIdx()].second;
+    unsigned int beginIdx = qbond->getBeginAtomIdx();
+    unsigned int endIdx = qbond->getEndAtomIdx();
+    if (beginIdx >= match.size() || endIdx >= match.size()) {
+      continue;
+    }
+    unsigned int idx1 = match[beginIdx].second;
+    unsigned int idx2 = match[endIdx].second;
     const auto bond = d_mol->getBondBetweenAtoms(idx1, idx2);
     if (bond != nullptr) {
       rjBonds.PushBack(bond->getIdx(), doc.GetAllocator());
@@ -216,7 +259,7 @@ std::string JSMol::get_substruct_matches(const JSMol &q) const {
     rj::Document doc;
     doc.SetArray();
 
-    for (const auto match : matches) {
+    for (const auto &match : matches) {
       rj::Value rjMatch(rj::kObjectType);
       get_sss_json(d_mol.get(), q.d_mol.get(), match, rjMatch, doc);
       doc.PushBack(rjMatch, doc.GetAllocator());
@@ -276,6 +319,7 @@ std::string JSMol::get_stereo_tags() const {
   bool flagPossibleStereocenters = true;
   MolOps::assignStereochemistry(*d_mol, cleanIt, force,
                                 flagPossibleStereocenters);
+  CIPLabeler::assignCIPLabels(*d_mol);
 
   rj::Value rjAtoms(rj::kArrayType);
   for (const auto atom : d_mol->atoms()) {
@@ -299,19 +343,17 @@ std::string JSMol::get_stereo_tags() const {
 
   rj::Value rjBonds(rj::kArrayType);
   for (const auto bond : d_mol->bonds()) {
-    std::string cip = "";
-    if (bond->getStereo() == Bond::STEREOE)
-      cip = "(E)";
-    else if (bond->getStereo() == Bond::STEREOZ)
-      cip = "(Z)";
-    if (cip.empty()) continue;
-    rj::Value entry(rj::kArrayType);
-    entry.PushBack(bond->getBeginAtomIdx(), doc.GetAllocator());
-    entry.PushBack(bond->getEndAtomIdx(), doc.GetAllocator());
-    rj::Value v;
-    v.SetString(cip.c_str(), cip.size(), doc.GetAllocator());
-    entry.PushBack(v, doc.GetAllocator());
-    rjBonds.PushBack(entry, doc.GetAllocator());
+    std::string cip;
+    if (bond->getPropIfPresent(common_properties::_CIPCode, cip)) {
+      cip = "(" + cip + ")";
+      rj::Value entry(rj::kArrayType);
+      entry.PushBack(bond->getBeginAtomIdx(), doc.GetAllocator());
+      entry.PushBack(bond->getEndAtomIdx(), doc.GetAllocator());
+      rj::Value v;
+      v.SetString(cip.c_str(), cip.size(), doc.GetAllocator());
+      entry.PushBack(v, doc.GetAllocator());
+      rjBonds.PushBack(entry, doc.GetAllocator());
+    }
   }
 
   doc.AddMember("CIP_bonds", rjBonds, doc.GetAllocator());
@@ -389,18 +431,89 @@ std::string JSMol::add_hs() const {
   return MolToMolBlock(molCopy, includeStereo, confId, kekulize);
 }
 
+std::string JSMol::condense_abbreviations(double maxCoverage, bool useLinkers) {
+  if (!d_mol) return "";
+  if (!useLinkers) {
+    Abbreviations::condenseMolAbbreviations(
+        *d_mol, Abbreviations::Utils::getDefaultAbbreviations(), maxCoverage);
+  } else {
+    Abbreviations::condenseMolAbbreviations(
+        *d_mol, Abbreviations::Utils::getDefaultLinkers(), maxCoverage);
+  }
+  return "";
+}
+
+std::string JSMol::condense_abbreviations_from_defs(
+    const std::string &definitions, double maxCoverage, bool areLinkers) {
+  static std::string lastDefs = "";
+  static std::vector<Abbreviations::AbbreviationDefinition> abbrevs;
+  if (definitions != lastDefs) {
+    // yes, we are making the assumption that the "areLinkers" argument remains
+    // the same if the definitions are the same
+    bool removeExtraDummies = areLinkers;
+    bool allowConnectionToDummies = areLinkers;
+    lastDefs = definitions;
+    try {
+      abbrevs = Abbreviations::Utils::parseAbbreviations(
+          definitions, removeExtraDummies, allowConnectionToDummies);
+    } catch (...) {
+      return "cannot parse abbreviations";
+    }
+  }
+  Abbreviations::condenseMolAbbreviations(*d_mol, abbrevs, maxCoverage);
+}
+
+std::string JSMol::generate_aligned_coords(const JSMol &templateMol,
+                                           bool useCoordGen,
+                                           bool allowRGroups) {
+  std::string res;
+  if (!d_mol || !templateMol.d_mol || !templateMol.d_mol->getNumConformers())
+    return res;
+
+#ifdef RDK_BUILD_COORDGEN_SUPPORT
+  bool oprefer = RDDepict::preferCoordGen;
+  RDDepict::preferCoordGen = useCoordGen;
+#endif
+  RDKit::ROMol *refPattern = nullptr;
+  bool acceptFailure = true;
+  int confId = -1;
+  RDKit::MatchVectType match = RDDepict::generateDepictionMatching2DStructure(
+      *d_mol, *(templateMol.d_mol), confId, refPattern, acceptFailure, false,
+      allowRGroups);
+  if (!match.empty()) {
+    rj::Document doc;
+    doc.SetObject();
+    get_sss_json(d_mol.get(), templateMol.d_mol.get(), match, doc, doc);
+    rj::StringBuffer buffer;
+    rj::Writer<rj::StringBuffer> writer(buffer);
+    doc.Accept(writer);
+    res = buffer.GetString();
+  }
+#ifdef RDK_BUILD_COORDGEN_SUPPORT
+  RDDepict::preferCoordGen = oprefer;
+#endif
+  return res;
+};
+
+
 std::string get_inchikey_for_inchi(const std::string &input) {
   return InchiToInchiKey(input);
 }
 
 JSMol *get_mol(const std::string &input) {
-  ROMol *mol = mol_from_input(input);
+  RWMol *mol = mol_from_input(input);
   return new JSMol(mol);
 }
 
 JSMol *get_qmol(const std::string &input) {
-  ROMol *mol = qmol_from_input(input);
+  RWMol *mol = qmol_from_input(input);
   return new JSMol(mol);
 }
 
 std::string version() { return std::string(rdkitVersion); }
+
+void prefer_coordgen(bool useCoordGen) {
+#ifdef RDK_BUILD_COORDGEN_SUPPORT
+  RDDepict::preferCoordGen = useCoordGen;
+#endif
+}

@@ -1,4 +1,4 @@
-find_package(SWIG REQUIRED)
+find_package(SWIG 3.0 EXACT REQUIRED)
 include(${SWIG_USE_FILE})
 
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR})
@@ -9,7 +9,7 @@ SET(CMAKE_SWIG_FLAGS "")
 
 
 set(swigRDKitLibSuffix "")
-if(RDK_SWIG_STATIC AND ((NOT MSVC) OR (MSVC AND RDK_INSTALL_DLLS_MSVC)))
+if(RDK_SWIG_STATIC AND (NOT WIN32))
   set(swigRDKitLibSuffix "_static")
 endif()
 set(swigRDKitLibList "")
@@ -20,12 +20,13 @@ if(RDK_BUILD_INCHI_SUPPORT)
   set(swigRDKitLibList "${swigRDKitLibList}RDInchiLib;${INCHI_LIBRARIES};")
 endif(RDK_BUILD_INCHI_SUPPORT)
 set(swigRDKitLibList "${swigRDKitLibList}"
-  "ScaffoldNetwork;MolHash;RGroupDecomposition;SubstructLibrary;"
+  "Abbreviations;ScaffoldNetwork;MolHash;RGroupDecomposition;SubstructLibrary;TautomerQuery;"
+  "MolEnumerator;"
   "MolStandardize;FilterCatalog;Catalogs;FMCS;MolDraw2D;FileParsers;SmilesParse;"
   "Depictor;SubstructMatch;ChemReactions;Fingerprints;ChemTransforms;"
   "Subgraphs;GraphMol;DataStructs;Trajectory;Descriptors;"
   "PartialCharges;MolTransforms;DistGeomHelpers;DistGeometry;"
-  "ForceFieldHelpers;ForceField;EigenSolvers;Optimizer;MolAlign;"
+  "ForceFieldHelpers;ForceField;EigenSolvers;Optimizer;MolAlign;O3AAlign;"
   "Alignment;SimDivPickers;RDGeometryLib;RDStreams;RDGeneral;"
 )
 #if(RDK_BUILD_COORDGEN_SUPPORT)
@@ -43,15 +44,15 @@ set(swigRDKitLibs "${swigRDKitLibs}${Boost_SERIALIZATION_LIBRARY};")
 if(RDK_USE_BOOST_IOSTREAMS)
 ADD_DEFINITIONS("-DRDK_USE_BOOST_IOSTREAMS")
 if(WIN32)
-  find_package(Boost 1.56.0 COMPONENTS system iostreams REQUIRED)  
+  find_package(Boost ${RDK_BOOST_VERSION} COMPONENTS system iostreams REQUIRED)
   set(swigRDKitLibs "${swigRDKitLibs}${Boost_IOSTREAMS_LIBRARY};${Boost_SYSTEM_LIBRARY};")
   
-  find_package(Boost 1.56.0 COMPONENTS zlib)
+  find_package(Boost ${RDK_BOOST_VERSION} COMPONENTS zlib)
   if(Boost_ZLIB_FOUND)
     set(swigRDKitLibs "${swigRDKitLibs}${Boost_ZLIB_LIBRARY};")
   endif()
 else()
-  find_package(Boost 1.56.0 COMPONENTS system iostreams REQUIRED)
+  find_package(Boost ${RDK_BOOST_VERSION} COMPONENTS system iostreams REQUIRED)
   set(swigRDKitLibs "${swigRDKitLibs}${Boost_IOSTREAMS_LIBRARY};${Boost_SYSTEM_LIBRARY};")
 endif()
 endif(RDK_USE_BOOST_IOSTREAMS)

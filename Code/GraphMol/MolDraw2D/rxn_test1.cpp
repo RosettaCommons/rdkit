@@ -62,7 +62,7 @@ void drawit(ChemicalReaction *rxn, std::string nameBase,
     outs.flush();
   }
 }
-}
+}  // namespace
 
 void test1() {
   std::cout << " ----------------- Test 1" << std::endl;
@@ -186,7 +186,7 @@ C3)c4cccc(c4Cl)Cl	CCc1nc(c(n1c2ccccc2)C)C(=O)NCCN3CCN(CC3)c4cccc(c4Cl)Cl\n\
     std::vector<std::string> lines;
     boost::split(lines, indata, boost::is_any_of("\n"));
     unsigned int idx = 0;
-    BOOST_FOREACH (std::string &line, lines) {
+    for (auto &line : lines) {
       std::vector<std::string> tokens;
       boost::split(tokens, line, boost::is_any_of("\t "));
       std::cerr << tokens.size() << " " << line << std::endl;

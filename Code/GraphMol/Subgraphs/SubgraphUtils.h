@@ -12,7 +12,10 @@
 #define _RD_SUBGRAPHUTILS_H_
 
 #include "Subgraphs.h"
+#include <RDGeneral/BoostStartInclude.h>
 #include <boost/tuple/tuple.hpp>
+#include <RDGeneral/BoostEndInclude.h>
+
 #include <cstdint>
 
 namespace RDKit {
@@ -25,7 +28,7 @@ typedef boost::tuples::tuple<std::uint32_t, std::uint32_t, std::uint32_t>
 
 RDKIT_SUBGRAPHS_EXPORT DiscrimTuple calcPathDiscriminators(
     const ROMol &mol, const PATH_TYPE &path, bool useBO = true,
-    std::vector<std::uint32_t> *extraInvars = 0);
+    std::vector<std::uint32_t> *extraInvars = nullptr);
 RDKIT_SUBGRAPHS_EXPORT PATH_LIST uniquifyPaths(const ROMol &mol,
                                                const PATH_LIST &allPathsb,
                                                bool useBO = true);

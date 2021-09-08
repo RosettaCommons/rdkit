@@ -1,5 +1,5 @@
 //
-//   Copyright (C) 2002-2018 Greg Landrum and Rational Discovery LLC
+//   Copyright (C) 2002-2021 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -7,6 +7,12 @@
 //  which is included in the file license.txt, found at the root
 //  of the RDKit source tree.
 //
+#include <algorithm>
+#include <iostream>
+#include <map>
+#include <math.h>
+#include <random>
+
 #include <RDGeneral/test.h>
 #include <RDGeneral/utils.h>
 #include <RDGeneral/Invariant.h>
@@ -21,11 +27,6 @@
 #include <GraphMol/FileParsers/MolSupplier.h>
 #include <GraphMol/FileParsers/MolWriters.h>
 #include <GraphMol/Substruct/SubstructMatch.h>
-
-#include <iostream>
-#include <map>
-#include <algorithm>
-#include <boost/foreach.hpp>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -265,7 +266,6 @@ void test3() {
   TEST_ASSERT(bfs == 2);
   delete m;
 
-
   // Counterexamples in ring perception figure 4:
   //  * The native Figueras algorithm cannot work on this molecule, it will
   //    fail after finding one ring. Naive modified Figueras finds a 6 membered
@@ -281,7 +281,6 @@ void test3() {
     TEST_ASSERT(bring.size() < 6);
   }
   delete m;
-
 
   smi = "C1CC2C1CCC2";
   m = SmilesToMol(smi);
@@ -659,7 +658,7 @@ void test8() {
   delete m2;
 
   std::string sma;
-  smi = "CC";
+  smi = "C-C";
   m = SmartsToMol(smi);
   MolOps::sanitizeMol(*((RWMol *)m));
   TEST_ASSERT(m);
@@ -1977,6 +1976,75 @@ void testAddHsCoords() {
   delete m;
   delete m2;
 
+  {
+    // make sure Hs are on the xy plane if conformer is 2D
+    auto m = "C=C"_smiles;
+    TEST_ASSERT(m.get());
+    TEST_ASSERT(m->getNumAtoms() == 2);
+    conf = new Conformer(2);
+    m->addConformer(conf);
+    conf->setAtomPos(0, RDGeom::Point3D(0, 0, 0));
+    conf->setAtomPos(1, RDGeom::Point3D(1.3, 0, 0));
+    conf->set3D(false);
+
+    MolOps::addHs(*m, false, true);
+
+    conf = &(m->getConformer());
+
+    TEST_ASSERT(m->getNumAtoms() == 6);
+
+    TEST_ASSERT(feq(conf->getAtomPos(2).z, 0.0));
+    TEST_ASSERT(feq(conf->getAtomPos(3).z, 0.0));
+    TEST_ASSERT(feq(conf->getAtomPos(4).z, 0.0));
+    TEST_ASSERT(feq(conf->getAtomPos(5).z, 0.0));
+  }
+
+  {
+    // make sure NHs are on the same plane as the double bond
+    auto m = "NC=C"_smiles;
+    TEST_ASSERT(m.get());
+    TEST_ASSERT(m->getNumAtoms() == 3);
+    unsigned int nh2Idx = 0;
+    unsigned int chIdx = 1;
+    unsigned int ch2Idx = 2;
+    conf = new Conformer(3);
+    m->addConformer(conf);
+    conf->setAtomPos(nh2Idx, RDGeom::Point3D(1.759236, 0.825542, 1.347849));
+    conf->setAtomPos(chIdx, RDGeom::Point3D(0.817392, 0.181048, 2.180373));
+    conf->setAtomPos(ch2Idx, RDGeom::Point3D(-0.070943, 0.888262, 2.875625));
+
+    MolOps::addHs(*m, false, true);
+
+    conf = &(m->getConformer());
+
+    TEST_ASSERT(m->getNumAtoms() == 8);
+
+    std::vector<unsigned int> nh2HIdxs{3, 4};
+    unsigned int chHIdx = 5;
+    std::vector<unsigned int> ch2HIdxs{6, 7};
+    RDGeom::Point3D nccNormal =
+        (conf->getAtomPos(nh2Idx) - conf->getAtomPos(chIdx))
+            .crossProduct((conf->getAtomPos(ch2Idx) - conf->getAtomPos(chIdx)));
+    nccNormal.normalize();
+    RDGeom::Point3D hnhNormal =
+        (conf->getAtomPos(nh2HIdxs[0]) - conf->getAtomPos(nh2Idx))
+            .crossProduct(conf->getAtomPos(nh2HIdxs[1]) -
+                          conf->getAtomPos(nh2Idx));
+    hnhNormal.normalize();
+    RDGeom::Point3D hchNormal =
+        (conf->getAtomPos(ch2HIdxs[0]) - conf->getAtomPos(ch2Idx))
+            .crossProduct(conf->getAtomPos(nh2HIdxs[1]) -
+                          conf->getAtomPos(ch2Idx));
+    hchNormal.normalize();
+    RDGeom::Point3D hcnNormal =
+        (conf->getAtomPos(chHIdx) - conf->getAtomPos(chIdx))
+            .crossProduct((conf->getAtomPos(nh2Idx) - conf->getAtomPos(chIdx)));
+    hcnNormal.normalize();
+    TEST_ASSERT(feq(fabs(nccNormal.dotProduct(hnhNormal)), 1.0));
+    TEST_ASSERT(feq(fabs(nccNormal.dotProduct(hchNormal)), 1.0));
+    TEST_ASSERT(feq(fabs(nccNormal.dotProduct(hcnNormal)), 1.0));
+  }
+
   smi = "C#C";
   m = SmilesToMol(smi);
   TEST_ASSERT(m);
@@ -2468,12 +2536,13 @@ void testSFIssue1719053() {
   TEST_ASSERT(m->getAtomWithIdx(1)->getChiralTag() == Atom::CHI_UNSPECIFIED);
   TEST_ASSERT(m->getAtomWithIdx(4)->getChiralTag() == Atom::CHI_UNSPECIFIED);
 
+  // N in rings that aren't 3 rings is not chiral
   delete m;
   smi = "C[N@@]1CC[C@@H](C)CC1";
   m = SmilesToMol(smi);
   TEST_ASSERT(m);
-  TEST_ASSERT(m->getAtomWithIdx(1)->getChiralTag() != Atom::CHI_UNSPECIFIED);
-  TEST_ASSERT(m->getAtomWithIdx(4)->getChiralTag() != Atom::CHI_UNSPECIFIED);
+  TEST_ASSERT(m->getAtomWithIdx(1)->getChiralTag() == Atom::CHI_UNSPECIFIED);
+  TEST_ASSERT(m->getAtomWithIdx(4)->getChiralTag() == Atom::CHI_UNSPECIFIED);
 
   delete m;
   BOOST_LOG(rdInfoLog) << "Finished" << std::endl;
@@ -4681,7 +4750,7 @@ void _renumberTest(const ROMol *m) {
   std::string refSmi = MolToSmiles(*m, true);
   for (unsigned int i = 0; i < m->getNumAtoms(); ++i) {
     std::vector<unsigned int> nVect(idxV);
-    std::random_shuffle(nVect.begin(), nVect.end());
+    std::shuffle(nVect.begin(), nVect.end(), std::mt19937(0xf00d));
     // std::copy(nVect.begin(),nVect.end(),std::ostream_iterator<int>(std::cerr,",
     // "));
     // std::cerr<<std::endl;
@@ -5302,10 +5371,10 @@ void testGithubIssue539() {
   }
   {
     std::vector<std::string> smilesVec;
-    smilesVec.push_back("C1=C[CH+]1");
-    smilesVec.push_back("C1=CC=C[CH+]C=C1");
-    smilesVec.push_back("c1c[cH+]1");
-    smilesVec.push_back("c1ccc[cH+]cc1");
+    smilesVec.emplace_back("C1=C[CH+]1");
+    smilesVec.emplace_back("C1=CC=C[CH+]C=C1");
+    smilesVec.emplace_back("c1c[cH+]1");
+    smilesVec.emplace_back("c1ccc[cH+]cc1");
     for (std::vector<std::string>::const_iterator smiles = smilesVec.begin();
          smiles != smilesVec.end(); ++smiles) {
       RWMol *m = SmilesToMol(*smiles);
@@ -7587,6 +7656,370 @@ void testGithub1990() {
   }
   BOOST_LOG(rdInfoLog) << "Finished" << std::endl;
 }
+
+void testRemoveAndTrackIsotopes() {
+  BOOST_LOG(rdInfoLog)
+      << "-----------------------\n Testing removeAndTrackIsotopes parameter. "
+      << std::endl;
+  struct IsotopicHsCount {
+    IsotopicHsCount(const ROMol &mol) {
+      for (auto b : mol.bonds()) {
+        const auto ba = b->getBeginAtom();
+        const auto ea = b->getEndAtom();
+        if (ba->getAtomicNum() == 1 && ba->getIsotope()) {
+          ++d_map[ea->getIdx()];
+        } else if (ea->getAtomicNum() == 1 && ea->getIsotope()) {
+          ++d_map[ba->getIdx()];
+        }
+      }
+    }
+    // get the number of isotopic Hs attached to atom idx
+    unsigned int at(unsigned int idx) {
+      auto it = d_map.find(idx);
+      return (it == d_map.end() ? 0 : it->second);
+    }
+    // count total number of isotopes in the molecule
+    unsigned int total() {
+      return std::accumulate(
+          d_map.begin(), d_map.end(), 0U,
+          [](unsigned int s, const std::pair<unsigned int, unsigned int> &p) {
+            return s + p.second;
+          });
+    }
+    static void countExplicitImplicitHs(const ROMol &m, unsigned int &expl,
+                                        unsigned int &impl) {
+      expl = 0;
+      impl = 0;
+      for (auto a : m.atoms()) {
+        expl += a->getNumExplicitHs();
+        impl += a->getNumImplicitHs();
+      }
+    }
+    std::map<unsigned int, unsigned int> d_map;
+  };
+  // CHEMBL2024142
+  auto m =
+      "[2H]C1=C(C(=C2C(=C1[2H])C(=O)C(=C(C2=O)C([2H])([2H])[2H])C/C=C(\\C)/CC([2H])([2H])/C=C(/CC/C=C(\\C)/CCC=C(C)C)\\C([2H])([2H])[2H])[2H])[2H]"_smiles;
+  TEST_ASSERT(m.get());
+  std::unique_ptr<IsotopicHsCount> m_isotopicHsPerHeavy(
+      new IsotopicHsCount(*m));
+  unsigned int m_numExplicitHs;
+  unsigned int m_numImplicitHs;
+  IsotopicHsCount::countExplicitImplicitHs(*m, m_numExplicitHs,
+                                           m_numImplicitHs);
+  TEST_ASSERT(m_numExplicitHs == 0);
+  TEST_ASSERT(m_numImplicitHs == 28);
+  TEST_ASSERT(m_isotopicHsPerHeavy->total() == 12);
+  MolOps::RemoveHsParameters ps;
+  ps.removeAndTrackIsotopes = true;
+  std::unique_ptr<ROMol> mNoH(removeHs(*static_cast<ROMol *>(m.get()), ps));
+  TEST_ASSERT(mNoH->getAtomWithIdx(0)->getAtomicNum() == 6);
+  TEST_ASSERT(mNoH->getAtomWithIdx(0)->hasProp(common_properties::_isotopicHs));
+  std::vector<unsigned int> isoHs;
+  TEST_ASSERT(mNoH->getAtomWithIdx(0)->getPropIfPresent(
+      common_properties::_isotopicHs, isoHs));
+  TEST_ASSERT(isoHs.size() == 1);
+  TEST_ASSERT(isoHs.front() == 2);
+  TEST_ASSERT(mNoH->getAtomWithIdx(30)->getAtomicNum() == 6);
+  TEST_ASSERT(
+      !mNoH->getAtomWithIdx(30)->hasProp(common_properties::_isotopicHs));
+
+  IsotopicHsCount mNoH_isotopicHsPerHeavy(*mNoH);
+  unsigned int mNoH_numExplicitHs;
+  unsigned int mNoH_numImplicitHs;
+  IsotopicHsCount::countExplicitImplicitHs(*mNoH, mNoH_numExplicitHs,
+                                           mNoH_numImplicitHs);
+  TEST_ASSERT(mNoH_numExplicitHs == 0);
+  TEST_ASSERT(mNoH_numImplicitHs == 40);
+  TEST_ASSERT(mNoH_isotopicHsPerHeavy.total() == 0);
+  std::unique_ptr<ROMol> mH(MolOps::addHs(*mNoH));
+  std::unique_ptr<IsotopicHsCount> mH_isotopicHsPerHeavy(
+      new IsotopicHsCount(*mH));
+  unsigned int mH_numExplicitHs;
+  unsigned int mH_numImplicitHs;
+  IsotopicHsCount::countExplicitImplicitHs(*mH, mH_numExplicitHs,
+                                           mH_numImplicitHs);
+  TEST_ASSERT(mH_numExplicitHs == 0);
+  TEST_ASSERT(mH_numImplicitHs == 0);
+  MatchVectType match;
+  TEST_ASSERT(SubstructMatch(*mH, *m, match));
+  TEST_ASSERT(match.size() == m->getNumAtoms());
+  TEST_ASSERT(mH_isotopicHsPerHeavy->total() == 12);
+  std::unique_ptr<ROMol> mH2(MolOps::removeHs(*mH));
+  TEST_ASSERT(m->getNumAtoms() == mH2->getNumAtoms());
+  std::unique_ptr<IsotopicHsCount> mH2_isotopicHsPerHeavy(
+      new IsotopicHsCount(*mH2));
+  unsigned int mH2_numExplicitHs;
+  unsigned int mH2_numImplicitHs;
+  IsotopicHsCount::countExplicitImplicitHs(*mH2, mH2_numExplicitHs,
+                                           mH2_numImplicitHs);
+  MatchVectType matchH2;
+  TEST_ASSERT(SubstructMatch(*m, *mH2, matchH2));
+  TEST_ASSERT(matchH2.size() == m->getNumAtoms());
+  TEST_ASSERT(mH2_isotopicHsPerHeavy->total() == 12);
+  TEST_ASSERT(mH2_numExplicitHs == 28);
+  TEST_ASSERT(mH2_numImplicitHs == 0);
+  for (auto p : matchH2) {
+    TEST_ASSERT(mH2_isotopicHsPerHeavy->at(p.first) ==
+                m_isotopicHsPerHeavy->at(p.second));
+  }
+
+  // shuffle atoms before adding Hs; result should not change
+  std::vector<unsigned int> randomOrder(mNoH->getNumAtoms());
+  std::iota(randomOrder.begin(), randomOrder.end(), 0U);
+  std::random_shuffle(randomOrder.begin(), randomOrder.end());
+  std::unique_ptr<ROMol> mNoHRen(MolOps::renumberAtoms(*mNoH, randomOrder));
+  mH.reset(MolOps::addHs(*mNoHRen));
+  mH_isotopicHsPerHeavy.reset(new IsotopicHsCount(*mH));
+  IsotopicHsCount::countExplicitImplicitHs(*mH, mH_numExplicitHs,
+                                           mH_numImplicitHs);
+  TEST_ASSERT(mH_numExplicitHs == 0);
+  TEST_ASSERT(mH_numImplicitHs == 0);
+  MatchVectType matchRen;
+  TEST_ASSERT(SubstructMatch(*mH, *m, matchRen));
+  TEST_ASSERT(match != matchRen);
+  TEST_ASSERT(match.size() == matchRen.size());
+  TEST_ASSERT(mH_isotopicHsPerHeavy->total() == 12);
+  mH2.reset(MolOps::removeHs(*mH));
+  TEST_ASSERT(m->getNumAtoms() == mH2->getNumAtoms());
+  mH2_isotopicHsPerHeavy.reset(new IsotopicHsCount(*mH2));
+  IsotopicHsCount::countExplicitImplicitHs(*mH2, mH2_numExplicitHs,
+                                           mH2_numImplicitHs);
+  MatchVectType matchH2Ren;
+  TEST_ASSERT(SubstructMatch(*m, *mH2, matchH2Ren));
+  TEST_ASSERT(matchH2 != matchH2Ren);
+  TEST_ASSERT(matchH2.size() == matchH2Ren.size());
+  TEST_ASSERT(mH2_isotopicHsPerHeavy->total() == 12);
+  TEST_ASSERT(mH2_numExplicitHs == 28);
+  TEST_ASSERT(mH2_numImplicitHs == 0);
+  for (auto p : matchH2Ren) {
+    TEST_ASSERT(mH2_isotopicHsPerHeavy->at(p.first) ==
+                m_isotopicHsPerHeavy->at(p.second));
+  }
+
+  // Add isotopes incrementally only on some atoms at a time
+  // This should add 4 isotopes
+  UINT_VECT onlyOnAtoms{0, 12};
+  mH.reset(MolOps::addHs(*mNoH, false, false, &onlyOnAtoms));
+  mH_isotopicHsPerHeavy.reset(new IsotopicHsCount(*mH));
+  TEST_ASSERT(mH_isotopicHsPerHeavy->total() == 4);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(0) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(12) == 3);
+  // This should add 4 more isotopes
+  onlyOnAtoms = UINT_VECT{1, 2, 18};
+  mH.reset(MolOps::addHs(*mH, false, false, &onlyOnAtoms));
+  mH_isotopicHsPerHeavy.reset(new IsotopicHsCount(*mH));
+  TEST_ASSERT(mH_isotopicHsPerHeavy->total() == 8);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(0) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(1) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(2) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(12) == 3);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(18) == 2);
+  // This should add the last 4 isotopes
+  onlyOnAtoms = UINT_VECT{5, 32};
+  mH.reset(MolOps::addHs(*mH, false, false, &onlyOnAtoms));
+  mH_isotopicHsPerHeavy.reset(new IsotopicHsCount(*mH));
+  TEST_ASSERT(mH_isotopicHsPerHeavy->total() == 12);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(0) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(1) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(2) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(5) == 1);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(12) == 3);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(18) == 2);
+  TEST_ASSERT(mH_isotopicHsPerHeavy->at(32) == 3);
+  match.clear();
+  TEST_ASSERT(SubstructMatch(*mH, *m, match));
+  TEST_ASSERT(match.size() == mH->getNumAtoms());
+  for (auto p : match) {
+    auto m_nIso = m_isotopicHsPerHeavy->at(p.first);
+    if (!m_nIso) {
+      continue;
+    }
+    auto mH_nIso = mH_isotopicHsPerHeavy->at(p.second);
+    TEST_ASSERT(m_nIso == mH_nIso);
+  }
+
+  // Check that chirality on centers which bear both non-isotopic
+  // and isotopic Hs is preserved after...
+  std::set<Atom::ChiralType> chiralTypeSet;
+  std::set<Atom::ChiralType> chiralTypeSetAfterAddHs;
+  std::set<Atom::ChiralType> chiralTypeSetAfterRemoveAllHsAddHs;
+  std::set<Atom::ChiralType> chiralTypeSetAfterRemoveAllHsAddHsRemoveHs;
+  for (unsigned int i : {0, 1}) {
+    unsigned int hIdx = i + 24;
+    std::string expectedCipCode(1, 'R' + i);
+    std::unique_ptr<ROMol> mChiral(new ROMol(*m));
+    mChiral->getAtomWithIdx(23)->setChiralTag(Atom::CHI_TETRAHEDRAL_CW);
+    mChiral->getAtomWithIdx(hIdx)->setIsotope(0);
+    MolOps::assignStereochemistry(*mChiral, true, true);
+    TEST_ASSERT(mChiral->getAtomWithIdx(23)->getProp<std::string>(
+                    common_properties::_CIPCode) == expectedCipCode);
+    chiralTypeSet.insert(mChiral->getAtomWithIdx(23)->getChiralTag());
+    // 1) ...Adding Hs
+    mH.reset(MolOps::addHs(*mChiral));
+    MolOps::assignStereochemistry(*mH, true, true);
+    match.clear();
+    TEST_ASSERT(mH->getAtomWithIdx(23)->getProp<std::string>(
+                    common_properties::_CIPCode) == expectedCipCode);
+    chiralTypeSetAfterAddHs.insert(mH->getAtomWithIdx(23)->getChiralTag());
+    // 2) ...Removing all Hs including isotopes and then putting them back
+    mNoH.reset(MolOps::removeHs(*static_cast<ROMol *>(mChiral.get()), ps));
+    mH.reset(MolOps::addHs(*mNoH));
+    MolOps::assignStereochemistry(*mH, true, true);
+    match.clear();
+    TEST_ASSERT(SubstructMatch(*mH, *mChiral, match));
+    TEST_ASSERT(match.size() == mChiral->getNumAtoms());
+    TEST_ASSERT(mH->getAtomWithIdx(match[23].second)
+                    ->getProp<std::string>(common_properties::_CIPCode) ==
+                expectedCipCode);
+    chiralTypeSetAfterRemoveAllHsAddHs.insert(
+        mH->getAtomWithIdx(match[23].second)->getChiralTag());
+    // 3) ...Removing non-isotopic Hs
+    mNoH.reset(MolOps::removeHs(*mH));
+    MolOps::assignStereochemistry(*mNoH, true, true);
+    TEST_ASSERT(mNoH->getAtomWithIdx(match[23].second)
+                    ->getProp<std::string>(common_properties::_CIPCode) ==
+                expectedCipCode);
+    chiralTypeSetAfterRemoveAllHsAddHsRemoveHs.insert(
+        mNoH->getAtomWithIdx(match[23].second)->getChiralTag());
+  }
+  // CIP chirality is preserved because when all Hs are removed
+  // the parity is inverted on one of the enantiomers such that
+  // chirality is preserved also when Hs are implicit.
+  // So we must find a single parity before calling removeHs,
+  // and two afterwards.
+  TEST_ASSERT(chiralTypeSet.size() == 1 &&
+              *chiralTypeSet.begin() == Atom::CHI_TETRAHEDRAL_CW);
+  TEST_ASSERT(chiralTypeSetAfterAddHs.size() == 1 &&
+              *chiralTypeSetAfterAddHs.begin() == Atom::CHI_TETRAHEDRAL_CW);
+  TEST_ASSERT(chiralTypeSetAfterRemoveAllHsAddHs.size() == 2);
+  TEST_ASSERT(chiralTypeSetAfterRemoveAllHsAddHsRemoveHs.size() == 2);
+
+  // Check that chirality on centers which bear different
+  // H isotopes is preserved after...
+  chiralTypeSet.clear();
+  chiralTypeSetAfterAddHs.clear();
+  chiralTypeSetAfterRemoveAllHsAddHs.clear();
+  chiralTypeSetAfterRemoveAllHsAddHsRemoveHs.clear();
+  for (unsigned int i : {0, 1}) {
+    unsigned int hIdx = i + 24;
+    std::string expectedCipCode(1, 'R' + i);
+    std::unique_ptr<ROMol> mChiral(new ROMol(*m));
+    mChiral->getAtomWithIdx(23)->setChiralTag(Atom::CHI_TETRAHEDRAL_CCW);
+    mChiral->getAtomWithIdx(hIdx)->setIsotope(3);
+    MolOps::assignStereochemistry(*mChiral, true, true);
+    TEST_ASSERT(mChiral->getAtomWithIdx(23)->getProp<std::string>(
+                    common_properties::_CIPCode) == expectedCipCode);
+    chiralTypeSet.insert(mChiral->getAtomWithIdx(23)->getChiralTag());
+    // 1) ...Adding Hs
+    mH.reset(MolOps::addHs(*mChiral));
+    MolOps::assignStereochemistry(*mH, true, true);
+    match.clear();
+    TEST_ASSERT(mH->getAtomWithIdx(23)->getProp<std::string>(
+                    common_properties::_CIPCode) == expectedCipCode);
+    chiralTypeSetAfterAddHs.insert(mH->getAtomWithIdx(23)->getChiralTag());
+    // 2) ...Removing all Hs including isotopes and then putting them back
+    mNoH.reset(MolOps::removeHs(*static_cast<ROMol *>(mChiral.get()), ps));
+    mH.reset(MolOps::addHs(*mNoH));
+
+    MolOps::assignStereochemistry(*mH, true, true);
+    match.clear();
+    TEST_ASSERT(SubstructMatch(*mH, *mChiral, match));
+    TEST_ASSERT(match.size() == mChiral->getNumAtoms());
+    TEST_ASSERT(mH->getAtomWithIdx(match[23].second)
+                    ->getProp<std::string>(common_properties::_CIPCode) ==
+                expectedCipCode);
+    chiralTypeSetAfterRemoveAllHsAddHs.insert(
+        mH->getAtomWithIdx(match[23].second)->getChiralTag());
+    // 3) ...Removing non-isotopic Hs
+    mNoH.reset(MolOps::removeHs(*mH));
+    MolOps::assignStereochemistry(*mNoH, true, true);
+    TEST_ASSERT(mNoH->getAtomWithIdx(match[23].second)
+                    ->getProp<std::string>(common_properties::_CIPCode) ==
+                expectedCipCode);
+    chiralTypeSetAfterRemoveAllHsAddHsRemoveHs.insert(
+        mNoH->getAtomWithIdx(match[23].second)->getChiralTag());
+  }
+  // In this case we should find a single parity throughout
+  // as inverting the positions of 2H and 3H will trigger
+  // an inversion in CIP chirality without need for parity change
+  TEST_ASSERT(chiralTypeSet.size() == 1 &&
+              *chiralTypeSet.begin() == Atom::CHI_TETRAHEDRAL_CCW);
+  TEST_ASSERT(chiralTypeSetAfterAddHs.size() == 1 &&
+              *chiralTypeSetAfterAddHs.begin() == Atom::CHI_TETRAHEDRAL_CCW);
+  TEST_ASSERT(chiralTypeSetAfterRemoveAllHsAddHs.size() == 1 &&
+              *chiralTypeSetAfterRemoveAllHsAddHs.begin() ==
+                  Atom::CHI_TETRAHEDRAL_CCW);
+  TEST_ASSERT(chiralTypeSetAfterRemoveAllHsAddHsRemoveHs.size() == 1 &&
+              *chiralTypeSetAfterRemoveAllHsAddHsRemoveHs.begin() ==
+                  Atom::CHI_TETRAHEDRAL_CCW);
+  BOOST_LOG(rdInfoLog) << "Finished" << std::endl;
+}
+
+void testGithub3854() {
+  BOOST_LOG(rdInfoLog)
+      << "-----------------------\n Testing github issue 3854: "
+         "AddHs creates H atom with nan coordinates on edge case 2D structure"
+      << std::endl;
+
+  std::string molb = R"CTAB(
+     RDKit          2D
+
+  7  8  0  0  1  0  0  0  0  0999 V2000
+    5.0014    0.4125    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    4.1764    0.4125    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    3.3514    0.4125    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    2.9389    1.1271    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    3.3514    1.8412    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    4.1764    1.8412    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    4.5889    1.1271    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+  2  1  1  1
+  7  1  1  1
+  2  3  1  0
+  2  7  1  0
+  3  4  1  0
+  4  5  1  0
+  5  6  1  0
+  7  6  1  0
+M  END)CTAB";
+  bool sanitize = true;
+  bool removeHs = false;
+  std::unique_ptr<ROMol> m(MolBlockToMol(molb, sanitize, removeHs));
+  TEST_ASSERT(m);
+  TEST_ASSERT(m->getNumAtoms() == 7);
+
+  bool explicitOnly = false;
+  bool addCoords = true;
+  std::vector<unsigned> onlyOnAtoms = {1, 6};
+  std::unique_ptr<ROMol> m2(
+      MolOps::addHs(*m, explicitOnly, addCoords, &onlyOnAtoms));
+  TEST_ASSERT(m2);
+  TEST_ASSERT(m2->getNumAtoms() == 9);
+
+  auto conf = m2->getConformer();
+  for (auto i = 7; i < 9; ++i) {
+    auto atom_pos = conf.getAtomPos(i);
+    TEST_ASSERT(!isnan(atom_pos.x) && !isnan(atom_pos.y) && !isnan(atom_pos.z));
+  }
+
+  // check that we bisect the correct angle and point outside the rings
+  auto v71 = conf.getAtomPos(7) - conf.getAtomPos(1);
+  auto v21 = conf.getAtomPos(2) - conf.getAtomPos(1);
+  auto v01 = conf.getAtomPos(0) - conf.getAtomPos(1);
+  auto v61 = conf.getAtomPos(6) - conf.getAtomPos(1);
+  TEST_ASSERT(fabs(fabs(v71.dotProduct(v01)) - fabs(v71.dotProduct(v21))) <
+              1e-3);
+  TEST_ASSERT(v71.dotProduct(v61) < -1e-4);
+
+  auto v86 = conf.getAtomPos(8) - conf.getAtomPos(6);
+  auto v06 = conf.getAtomPos(0) - conf.getAtomPos(6);
+  auto v56 = conf.getAtomPos(5) - conf.getAtomPos(6);
+  auto v16 = conf.getAtomPos(1) - conf.getAtomPos(6);
+  TEST_ASSERT(fabs(fabs(v86.dotProduct(v56)) - fabs(v86.dotProduct(v06))) <
+              1e-3);
+  TEST_ASSERT(v86.dotProduct(v16) < -1e-4);
+}
+
 #ifdef RDK_USE_URF
 void testRingFamilies() {
   BOOST_LOG(rdInfoLog)
@@ -7610,7 +8043,6 @@ void testRingFamilies() {
     TEST_ASSERT(numRings == 6);
     numRings = m->getRingInfo()->numRings();
     TEST_ASSERT(numRings == 6);
-
 
     delete m;
   }
@@ -7640,11 +8072,43 @@ void testRingFamilies() {
 void testRingFamilies() {}
 #endif
 
+void testSetTerminalAtomCoords() {
+  BOOST_LOG(rdInfoLog) << "-----------------------\n Testing adding "
+                          "coordinates to a terminal atom. "
+                       << std::endl;
+  auto mol = R"CTAB(
+     RDKit          2D
+
+  6  6  0  0  0  0  0  0  0  0999 V2000
+    1.5000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    0.7500   -1.2990    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.7500   -1.2990    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -1.5000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+   -0.7500    1.2990    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+    0.7500    1.2990    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  2  0
+  2  3  1  0
+  3  4  2  0
+  4  5  1  0
+  5  6  2  0
+  6  1  1  0
+M  END)CTAB"_ctab;
+  auto atom = new Atom(0);
+  auto idx = mol->addAtom(atom);
+  delete atom;
+  mol->addBond(idx, 0);
+  MolOps::setTerminalAtomCoords(static_cast<ROMol &>(*mol), idx, 0);
+  auto &coord = mol->getConformer().getAtomPos(idx);
+  TEST_ASSERT(coord.x > 2.499 && coord.x < 2.501);
+  TEST_ASSERT(coord.y > -0.001 && coord.y < 0.001);
+  TEST_ASSERT(coord.z > -0.001 && coord.z < 0.001);
+  BOOST_LOG(rdInfoLog) << "\tdone" << std::endl;
+}
+
 int main() {
   RDLog::InitLogs();
   // boost::logging::enable_logs("rdApp.debug");
 
-#if 1
   test1();
   test2();
   test3();
@@ -7751,8 +8215,10 @@ int main() {
   testGithub1928();
   testGithub1990();
   testPotentialStereoBonds();
-#endif
   testRingFamilies();
+  testRemoveAndTrackIsotopes();
+  testGithub3854();
+  testSetTerminalAtomCoords();
 
   return 0;
 }

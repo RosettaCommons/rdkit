@@ -142,10 +142,10 @@ class streambuf : public std::basic_streambuf<char> {
         py_seek(getattr(python_file_obj, "seek", bp::object())),
         py_tell(getattr(python_file_obj, "tell", bp::object())),
         buffer_size(buffer_size_ != 0 ? buffer_size_ : default_buffer_size),
-        write_buffer(0),
+        write_buffer(nullptr),
         pos_of_read_buffer_end_in_py_file(0),
         pos_of_write_buffer_end_in_py_file(buffer_size),
-        farthest_pptr(0) {
+        farthest_pptr(nullptr) {
     TEST_ASSERT(buffer_size != 0);
     /* Some Python file objects (e.g. sys.stdout and sys.stdin)
        have non-functional seek and tell. If so, assign None to
@@ -179,7 +179,7 @@ class streambuf : public std::basic_streambuf<char> {
       farthest_pptr = pptr();
     } else {
       // The first attempt at output will result in a call to overflow
-      setp(0, 0);
+      setp(nullptr, nullptr);
     }
 
     if (py_tell != bp::object()) {
@@ -195,33 +195,33 @@ class streambuf : public std::basic_streambuf<char> {
       : streambuf(python_file_obj, buffer_size_) {
 #if 1
     bp::object io_mod = bp::import("io");
-    CHECK_INVARIANT(io_mod,"module not found");
-    bp::object iobase = io_mod.attr("TextIOBase");;
-    CHECK_INVARIANT(iobase,"base class not found");
-#else 
+    CHECK_INVARIANT(io_mod, "module not found");
+    bp::object iobase = io_mod.attr("TextIOBase");
+    CHECK_INVARIANT(iobase, "base class not found");
+#else
     // using statics to save an undetermined amount of time results in
     // alarming seg faults on windows. so we don't do it. Keep this here
     // for the moment though in case someone manages to figure that out in
-    // the future       
+    // the future
     static bp::object io_mod = bp::object();
     static bp::object iobase = bp::object();
-    if(!io_mod) io_mod = bp::import("io");
-    if(io_mod && !iobase) iobase = io_mod.attr("TextIOBase");
-    CHECK_INVARIANT(io_mod,"module not found");
-    CHECK_INVARIANT(iobase,"base class not found");
+    if (!io_mod) io_mod = bp::import("io");
+    if (io_mod && !iobase) iobase = io_mod.attr("TextIOBase");
+    CHECK_INVARIANT(io_mod, "module not found");
+    CHECK_INVARIANT(iobase, "base class not found");
 #endif
 
-    bool isTextMode = PyObject_IsInstance(python_file_obj.ptr(), iobase.ptr());
+    df_isTextMode = PyObject_IsInstance(python_file_obj.ptr(), iobase.ptr());
     switch (mode) {
       case 's':  /// yeah, is redundant, but it is somehow natural to do "s"
       case 't':
-        if (!isTextMode)
+        if (!df_isTextMode)
           throw ValueErrorException(
               "Need a text mode file object like StringIO or a file opened "
               "with mode 't'");
         break;
       case 'b':
-        if (isTextMode)
+        if (df_isTextMode)
           throw ValueErrorException(
               "Need a binary mode file object like BytesIO or a file opened "
               "with mode 'b'");
@@ -259,7 +259,7 @@ class streambuf : public std::basic_streambuf<char> {
     bp::ssize_t py_n_read;
     if (PyBytes_AsStringAndSize(read_buffer.ptr(), &read_buffer_data,
                                 &py_n_read) == -1) {
-      setg(0, 0, 0);
+      setg(nullptr, nullptr, nullptr);
       throw std::invalid_argument(
           "The method 'read' of the Python file object "
           "did not return a string.");
@@ -280,17 +280,42 @@ class streambuf : public std::basic_streambuf<char> {
     }
     farthest_pptr = std::max(farthest_pptr, pptr());
     off_type n_written = (off_type)(farthest_pptr - pbase());
-    bp::str chunk(pbase(), farthest_pptr);
+    off_type orig_n_written = n_written;
+    const unsigned int STD_ASCII = 0x7F;
+    if (df_isTextMode && static_cast<unsigned int>(c) > STD_ASCII) {
+      // we're somewhere in the middle of a utf8 block. If we
+      // only write part of it we'll end up with an exception,
+      // so push everything that could be utf8 into the next block
+      while (n_written > 0 && static_cast<unsigned int>(
+                                  write_buffer[n_written - 1]) > STD_ASCII) {
+        --n_written;
+      }
+    }
+    bp::str chunk(pbase(), pbase() + n_written);
     py_write(chunk);
-    if (!traits_type::eq_int_type(c, traits_type::eof())) {
+
+    if ((!df_isTextMode || static_cast<unsigned int>(c) <= STD_ASCII) &&
+        !traits_type::eq_int_type(c, traits_type::eof())) {
       py_write(traits_type::to_char_type(c));
       n_written++;
     }
+
+    setp(pbase(), epptr());
+    // ^^^ 27.5.2.4.5 (5)
+    farthest_pptr = pptr();
     if (n_written) {
       pos_of_write_buffer_end_in_py_file += n_written;
-      setp(pbase(), epptr());
-      // ^^^ 27.5.2.4.5 (5)
-      farthest_pptr = pptr();
+      if (df_isTextMode && static_cast<unsigned int>(c) > STD_ASCII &&
+          !traits_type::eq_int_type(c, traits_type::eof())) {
+        size_t n_to_copy = orig_n_written - n_written;
+
+        for (size_t i = 0; i < n_to_copy; ++i) {
+          sputc(write_buffer[n_written + i]);
+          ++farthest_pptr;
+        }
+        sputc(c);
+        ++farthest_pptr;
+      }
     }
     return traits_type::eq_int_type(c, traits_type::eof())
                ? traits_type::not_eof(c)
@@ -405,6 +430,7 @@ class streambuf : public std::basic_streambuf<char> {
      de-allocated only at destruction time.
   */
   char* write_buffer;
+  bool df_isTextMode;
 
   off_type pos_of_read_buffer_end_in_py_file,
       pos_of_write_buffer_end_in_py_file;
@@ -503,15 +529,8 @@ struct ostream : private streambuf_capsule, streambuf::ostream {
         streambuf::ostream(python_streambuf) {}
 
   ~ostream() noexcept {
-    try {
-      if (this->good()) this->flush();
-    } catch (bp::error_already_set&) {
-      PyErr_Clear();
-      throw std::runtime_error(
-          "Problem closing python ostream.\n"
-          "  Known limitation: the error is unrecoverable. Sorry.\n"
-          "  Suggestion for programmer: add ostream.flush() before"
-          " returning.");
+    if (this->good()) {
+      this->flush();
     }
   }
 };

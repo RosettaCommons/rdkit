@@ -142,7 +142,7 @@ std::string BuildV2000SPLLines(const ROMol &mol) {
     unsigned int parentIdx = -1;
     if (sg->getPropIfPresent("PARENT", parentIdx)) {
       temp << FormatV2000IntField(1 + (sg - sgroups.begin()))
-           << FormatV2000IntField(1 + parentIdx);
+           << FormatV2000IntField(parentIdx);
       if (++count == 8) {
         ret << "M  SPL" << FormatV2000NumEntriesField(8) << temp.str()
             << std::endl;
@@ -491,6 +491,15 @@ std::string BuildV3000BondsBlock(const SubstanceGroup &sgroup) {
   ret << BuildV3000IdxVectorDataBlock("XBONDS", bonds.begin(), first_cbond);
   ret << BuildV3000IdxVectorDataBlock("CBONDS", first_cbond, bonds.end());
 
+  if (sgroup.hasProp("XBHEAD")) {
+    auto v = sgroup.getProp<std::vector<unsigned int>>("XBHEAD");
+    ret << BuildV3000IdxVectorDataBlock("XBHEAD", v.begin(), v.end());
+  }
+  if (sgroup.hasProp("XBCORR")) {
+    auto v = sgroup.getProp<std::vector<unsigned int>>("XBCORR");
+    ret << BuildV3000IdxVectorDataBlock("XBCORR", v.begin(), v.end());
+  }
+
   return ret.str();
 }
 
@@ -500,18 +509,33 @@ std::string FormatV3000StringPropertyBlock(const std::string &prop,
 
   std::string propValue;
   if (sgroup.getPropIfPresent(prop, propValue)) {
-    ret << ' ' << prop << '=';
-    bool hasSpaces =
-        (propValue.end() != find(propValue.begin(), propValue.end(), ' '));
+    if (!propValue.empty()) {
+      ret << ' ' << prop << '=';
+      // CTAB spec says: "Strings that contain blank spaces or start with left
+      // parenthesis or double quote, must be surrounded by double quotes A
+      // double quote can be entered literally by doubling it."
+      // However, BIOVIA Draw 2020 doesn't correctly parse values like
+      // foo"" or foo(bar) but does fine with "foo""" and "foo(bar)"
+      // and both BIOVIA Draw and Marvin Sketch happily ignore the theoretically
+      // extra quotes.
+      bool needsQuotes = propValue.find(' ') != std::string::npos ||
+                         propValue.find('"') != std::string::npos ||
+                         propValue.find('(') != std::string::npos;
+      if (needsQuotes) {
+        ret << "\"";
+      }
 
-    if (hasSpaces || propValue.empty()) {
-      ret << "\"";
-    }
+      for (auto chr : propValue) {
+        ret << chr;
+        // double quotes need to be doubled on output:
+        if (chr == '"') {
+          ret << chr;
+        }
+      }
 
-    ret << propValue;
-
-    if (hasSpaces || propValue.empty()) {
-      ret << "\"";
+      if (needsQuotes) {
+        ret << "\"";
+      }
     }
   }
 
@@ -523,7 +547,7 @@ std::string FormatV3000ParentBlock(const SubstanceGroup &sgroup) {
 
   unsigned int parentIdx = -1;
   if (sgroup.getPropIfPresent("PARENT", parentIdx)) {
-    ret << " PARENT=" << (1 + parentIdx);
+    ret << " PARENT=" << parentIdx;
   }
 
   return ret.str();
@@ -623,6 +647,7 @@ const std::string GetV3000MolFileSGroupLines(const unsigned int idx,
   os << idx << ' ' << sgroup.getProp<std::string>("TYPE") << ' ' << id;
 
   os << BuildV3000IdxVectorDataBlock("ATOMS", sgroup.getAtoms());
+  // also writes XBHEAD and XBCORR
   os << BuildV3000BondsBlock(sgroup);
   os << BuildV3000IdxVectorDataBlock("PATOMS", sgroup.getParentAtoms());
   os << FormatV3000StringPropertyBlock("SUBTYPE", sgroup);
@@ -630,8 +655,6 @@ const std::string GetV3000MolFileSGroupLines(const unsigned int idx,
   os << FormatV3000StringPropertyBlock("CONNECT", sgroup);
   os << FormatV3000ParentBlock(sgroup);
   os << FormatV3000CompNoBlock(sgroup);
-  // XBHEAD -> part of V2000 CRS, not supported yet
-  // XBCORR -> part of V2000 CRS, not supported yet
   os << FormatV3000StringPropertyBlock("LABEL", sgroup);
   os << FormatV3000BracketBlock(sgroup.getBrackets());
   os << FormatV3000StringPropertyBlock("ESTATE", sgroup);

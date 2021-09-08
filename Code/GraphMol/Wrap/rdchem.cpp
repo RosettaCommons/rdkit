@@ -14,7 +14,6 @@
 #include <GraphMol/RDKitBase.h>
 #include <GraphMol/SanitException.h>
 #include <RDBoost/import_array.h>
-#include <RDBoost/iterator_next.h>
 
 #ifdef RDK_THREADSAFE_SSS
 // Thread local storage for output buffer for RDKit Logging
@@ -49,6 +48,7 @@ void wrap_monomerinfo();
 void wrap_resmolsupplier();
 void wrap_molbundle();
 void wrap_sgroup();
+void wrap_chirality();
 
 struct PySysErrWrite : std::ostream, std::streambuf {
   std::string prefix;
@@ -139,7 +139,7 @@ void sanitExceptionTranslator(const EXC_TYPE &x, PyObject *pyExcType) {
   PRECONDITION(pyExcType != nullptr, "global type not initialized");
   python::object pyExcInstance(python::handle<>(python::borrowed(pyExcType)));
   pyExcInstance.attr("cause") = x;
-  PyErr_SetString(pyExcType, x.message());
+  PyErr_SetString(pyExcType, x.what());
 }
 
 // pattern from here:
@@ -159,11 +159,22 @@ PyObject *createExceptionClass(const char *name,
   return typeObj;
 }
 
+template <typename O, typename T>
+T *get_item_ptr(O &self, int i) {
+  return self.get_item(i).get();
+}
+
+template <typename O, typename T>
+T *next_ptr(O &self) {
+  return self.next().get();
+}
+
 BOOST_PYTHON_MODULE(rdchem) {
   python::scope().attr("__doc__") =
       "Module containing the core chemistry functionality of the RDKit";
   RegisterListConverter<RDKit::Atom *>();
   RegisterListConverter<RDKit::Bond *>();
+  RegisterListConverter<RDKit::CONFORMER_SPTR>();
   rdkit_import_array();
 
   // this is one of those parts where I think I wish that I knew how to do
@@ -171,7 +182,7 @@ BOOST_PYTHON_MODULE(rdchem) {
   python::class_<MolSanitizeException>("_cppMolSanitizeException",
                                        "exception arising from sanitization",
                                        python::no_init)
-      .def("Message", &MolSanitizeException::message)
+      .def("Message", &MolSanitizeException::what)
       .def("GetType", &MolSanitizeException::getType);
   python::register_ptr_to_python<boost::shared_ptr<MolSanitizeException>>();
   molSanitizeExceptionType = createExceptionClass("MolSanitizeException");
@@ -241,37 +252,62 @@ BOOST_PYTHON_MODULE(rdchem) {
   //*********************************************
   python::class_<AtomIterSeq>(
       "_ROAtomSeq",
-      "Read-only sequence of atoms, not constructable from Python.",
+      "Read-only sequence of atoms, not constructible from Python.",
       python::no_init)
       .def("__iter__", &AtomIterSeq::__iter__,
            python::return_internal_reference<
                1, python::with_custodian_and_ward_postcall<0, 1>>())
-      .def(NEXT_METHOD, &AtomIterSeq::next,
-           python::return_value_policy<python::reference_existing_object>())
+      .def("__next__", &AtomIterSeq::next,
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>())
 
       .def("__len__", &AtomIterSeq::len)
       .def("__getitem__", &AtomIterSeq::get_item,
-           python::return_value_policy<python::reference_existing_object>());
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>());
   python::class_<QueryAtomIterSeq>("_ROQAtomSeq",
                                    "Read-only sequence of atoms matching a "
-                                   "query, not constructable from Python.",
+                                   "query, not constructible from Python.",
                                    python::no_init)
       .def("__iter__", &QueryAtomIterSeq::__iter__,
            python::return_internal_reference<
                1, python::with_custodian_and_ward_postcall<0, 1>>())
-      .def(NEXT_METHOD, &QueryAtomIterSeq::next,
-           python::return_value_policy<python::reference_existing_object>())
+      .def("__next__", &QueryAtomIterSeq::next,
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>())
       .def("__len__", &QueryAtomIterSeq::len)
       .def("__getitem__", &QueryAtomIterSeq::get_item,
-           python::return_value_policy<python::reference_existing_object>());
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>());
   python::class_<BondIterSeq>(
       "_ROBondSeq",
-      "Read-only sequence of bonds, not constructable from Python.",
+      "Read-only sequence of bonds, not constructible from Python.",
       python::no_init)
-      // FIX: we ought to be able to expose an iteration interface
+      .def("__iter__", &BondIterSeq::__iter__,
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>())
+      .def("__next__", &BondIterSeq::next,
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>())
       .def("__len__", &BondIterSeq::len)
       .def("__getitem__", &BondIterSeq::get_item,
-           python::return_value_policy<python::reference_existing_object>());
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>());
+  python::class_<ConformerIterSeq>(
+      "_ROConformerSeq",
+      "Read-only sequence of conformers, not constructible from Python.",
+      python::no_init)
+      .def("__iter__", &ConformerIterSeq::__iter__,
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>())
+      .def("__next__", next_ptr<ConformerIterSeq, Conformer>,
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>())
+
+      .def("__len__", &ConformerIterSeq::len)
+      .def("__getitem__", get_item_ptr<ConformerIterSeq, Conformer>,
+           python::return_internal_reference<
+               1, python::with_custodian_and_ward_postcall<0, 1>>());
 
   //*********************************************
   //
@@ -290,6 +326,7 @@ BOOST_PYTHON_MODULE(rdchem) {
   wrap_resmolsupplier();
   wrap_molbundle();
   wrap_sgroup();
+  wrap_chirality();
 
   //*********************************************
   //

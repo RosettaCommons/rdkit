@@ -16,35 +16,33 @@
 //! \brief Class to allow us to throw an \c IndexError from C++ and have
 //!         it make it back to Python
 //!
-class IndexErrorException : public std::runtime_error {
+class RDKIT_RDGENERAL_EXPORT IndexErrorException : public std::runtime_error {
  public:
   IndexErrorException(int i)
-      : std::runtime_error("IndexErrorException"), _idx(i){};
+      : std::runtime_error("IndexErrorException"),
+        _idx(i),
+        _msg("Index Error: " + std::to_string(_idx)){};
   int index() const { return _idx; };
 
-  const char* what() const noexcept override {
-    std::string msg{"Index Error: "};
-    msg.append(std::to_string(_idx));
-    return msg.c_str();
-  };
+  const char* what() const noexcept override { return _msg.c_str(); };
 
   ~IndexErrorException() noexcept {};
 
  private:
   int _idx;
+  std::string _msg;
 };
 
 //! \brief Class to allow us to throw a \c ValueError from C++ and have
 //!         it make it back to Python
 //!
-class ValueErrorException : public std::runtime_error {
+class RDKIT_RDGENERAL_EXPORT ValueErrorException : public std::runtime_error {
  public:
   ValueErrorException(const std::string& i)
       : std::runtime_error("ValueErrorException"), _value(i){};
   ValueErrorException(const char* msg)
       : std::runtime_error("ValueErrorException"), _value(msg){};
   const char* what() const noexcept override { return _value.c_str(); };
-  const char* message() const noexcept { return what(); };
   ~ValueErrorException() noexcept {};
 
  private:
@@ -54,22 +52,21 @@ class ValueErrorException : public std::runtime_error {
 //! \brief Class to allow us to throw a \c KeyError from C++ and have
 //!         it make it back to Python
 //!
-class KeyErrorException : public std::runtime_error {
+class RDKIT_RDGENERAL_EXPORT KeyErrorException : public std::runtime_error {
  public:
   KeyErrorException(std::string key)
-      : std::runtime_error("KeyErrorException"), _key(key){};
+      : std::runtime_error("KeyErrorException"),
+        _key(key),
+        _msg("Key Error: " + key){};
   std::string key() const { return _key; };
 
-  const char* what() const noexcept override {
-    std::string msg{"Key Error: "};
-    msg.append(_key);
-    return msg.c_str();
-  };
+  const char* what() const noexcept override { return _msg.c_str(); };
 
   ~KeyErrorException() noexcept {};
 
  private:
   std::string _key;
+  std::string _msg;
 };
 
 #endif

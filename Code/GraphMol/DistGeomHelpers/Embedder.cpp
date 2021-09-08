@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2004-2019 Greg Landrum and Rational Discovery LLC
+//  Copyright (C) 2004-2021 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -30,6 +30,7 @@
 #include <DistGeom/ChiralSet.h>
 #include <GraphMol/MolOps.h>
 #include <GraphMol/ForceFieldHelpers/CrystalFF/TorsionPreferences.h>
+#include <GraphMol/Substruct/SubstructMatch.h>
 #include <boost/dynamic_bitset.hpp>
 #include <iomanip>
 #include <RDGeneral/RDThreads.h>
@@ -80,7 +81,8 @@ const EmbedParameters KDG(0,        // maxIterations
                           false,    // useSmallRingTorsions
                           false,    // useMacrocycleTorsions
                           false,    // useMacrocycle14config
-                          nullptr   // CPCI
+                          nullptr,  // CPCI
+                          nullptr   // callback
 );
 
 //! Parameters corresponding to Sereina Riniker's ETDG approach
@@ -108,7 +110,8 @@ const EmbedParameters ETDG(0,        // maxIterations
                            false,    // useSmallRingTorsions
                            false,    // useMacrocycleTorsions
                            false,    // useMacrocycle14config
-                           nullptr   // CPCI
+                           nullptr,  // CPCI
+                           nullptr   // callback
 );
 //! Parameters corresponding to Sereina Riniker's ETKDG approach
 const EmbedParameters ETKDG(0,        // maxIterations
@@ -135,7 +138,8 @@ const EmbedParameters ETKDG(0,        // maxIterations
                             false,    // useSmallRingTorsions
                             false,    // useMacrocycleTorsions
                             false,    // useMacrocycle14config
-                            nullptr   // CPCI
+                            nullptr,  // CPCI
+                            nullptr   // callback
 );
 
 //! Parameters corresponding to Sereina Riniker's ETKDG approach - version 2
@@ -163,7 +167,8 @@ const EmbedParameters ETKDGv2(0,        // maxIterations
                               false,    // useSmallRingTorsions
                               false,    // useMacrocycleTorsions
                               false,    // useMacrocycle14config
-                              nullptr   // CPCI
+                              nullptr,  // CPCI
+                              nullptr   // callback
 );
 
 //! Parameters corresponding improved ETKDG by Wang, Witek, Landrum and Riniker
@@ -192,7 +197,8 @@ const EmbedParameters ETKDGv3(0,        // maxIterations
                               false,    // useSmallRingTorsions
                               true,     // useMacrocycleTorsions
                               true,     // useMacrocycle14config
-                              nullptr   // CPCI
+                              nullptr,  // CPCI
+                              nullptr   // callback
 );
 
 //! Parameters corresponding improved ETKDG by Wang, Witek, Landrum and Riniker
@@ -221,7 +227,8 @@ const EmbedParameters srETKDGv3(0,        // maxIterations
                                 true,     // useSmallRingTorsions
                                 false,    // useMacrocycleTorsions
                                 false,    // useMacrocycle14config
-                                nullptr   // CPCI
+                                nullptr,  // CPCI
+                                nullptr   // callback
 );
 
 namespace detail {
@@ -229,7 +236,7 @@ struct EmbedArgs {
   boost::dynamic_bitset<> *confsOk;
   bool fourD;
   INT_VECT *fragMapping;
-  std::vector<Conformer *> *confs;
+  std::vector<std::unique_ptr<Conformer>> *confs;
   unsigned int fragIdx;
   DistGeom::BoundsMatPtr mmat;
   DistGeom::VECT_CHIRALSET const *chiralCenters;
@@ -407,7 +414,7 @@ bool generateInitialCoords(RDGeom::PointPtrVect *positions,
     }
     gotCoords = DistGeom::computeRandomCoords(*positions, boxSize, *rng);
     if (embedParams.useRandomCoords && embedParams.coordMap != nullptr) {
-      for (const auto v : *embedParams.coordMap) {
+      for (const auto &v : *embedParams.coordMap) {
         auto p = positions->at(v.first);
         for (unsigned int ci = 0; ci < v.second.dimension(); ++ci) {
           (*p)[ci] = v.second[ci];
@@ -428,7 +435,7 @@ bool firstMinimization(RDGeom::PointPtrVect *positions,
   bool gotCoords = true;
   boost::dynamic_bitset<> fixedPts(positions->size());
   if (embedParams.useRandomCoords && embedParams.coordMap != nullptr) {
-    for (const auto v : *embedParams.coordMap) {
+    for (const auto &v : *embedParams.coordMap) {
       fixedPts.set(v.first);
     }
   }
@@ -436,7 +443,7 @@ bool firstMinimization(RDGeom::PointPtrVect *positions,
       *eargs.mmat, *positions, *eargs.chiralCenters, 1.0, 0.1, nullptr,
       embedParams.basinThresh, &fixedPts));
   if (embedParams.useRandomCoords && embedParams.coordMap != nullptr) {
-    for (const auto v : *embedParams.coordMap) {
+    for (const auto &v : *embedParams.coordMap) {
       field->fixedPoints().push_back(v.first);
     }
   }
@@ -481,7 +488,7 @@ bool checkTetrahedralCenters(const RDGeom::PointPtrVect *positions,
   // for each of the atoms in the "tetrahedralCarbons" list, make sure
   // that there is a minimum volume around them and that they are inside
   // that volume. (this is part of github #971)
-  for (const auto tetSet : *eargs.tetrahedralCarbons) {
+  for (const auto &tetSet : *eargs.tetrahedralCarbons) {
     // it could happen that the centroid is outside the volume defined
     // by the other
     // four points. That is also a fail.
@@ -505,7 +512,7 @@ bool checkChiralCenters(const RDGeom::PointPtrVect *positions,
                         const EmbedParameters &embedParams) {
   RDUNUSED_PARAM(embedParams);
   // check the chiral volume:
-  for (const auto chiralSet : *eargs.chiralCenters) {
+  for (const auto &chiralSet : *eargs.chiralCenters) {
     double vol = DistGeom::ChiralViolationContrib::calcChiralVolume(
         chiralSet->d_idx1, chiralSet->d_idx2, chiralSet->d_idx3,
         chiralSet->d_idx4, *positions);
@@ -534,7 +541,7 @@ bool minimizeFourthDimension(RDGeom::PointPtrVect *positions,
       *eargs.mmat, *positions, *eargs.chiralCenters, 0.2, 1.0, nullptr,
       embedParams.basinThresh));
   if (embedParams.useRandomCoords && embedParams.coordMap != nullptr) {
-    for (const auto v : *embedParams.coordMap) {
+    for (const auto &v : *embedParams.coordMap) {
       field2->fixedPoints().push_back(v.first);
     }
   }
@@ -582,7 +589,7 @@ bool minimizeWithExpTorsions(RDGeom::PointPtrVect &positions,
                                                      *eargs.etkdgDetails));
   }
   if (embedParams.useRandomCoords && embedParams.coordMap != nullptr) {
-    for (const auto v : *embedParams.coordMap) {
+    for (const auto &v : *embedParams.coordMap) {
       field->fixedPoints().push_back(v.first);
     }
   }
@@ -605,7 +612,7 @@ bool minimizeWithExpTorsions(RDGeom::PointPtrVect &positions,
             *eargs.mmat, positions3D, eargs.etkdgDetails->improperAtoms,
             eargs.etkdgDetails->atomNums));
     if (embedParams.useRandomCoords && embedParams.coordMap != nullptr) {
-      for (const auto v : *embedParams.coordMap) {
+      for (const auto &v : *embedParams.coordMap) {
         field2->fixedPoints().push_back(v.first);
       }
     }
@@ -641,7 +648,7 @@ bool finalChiralChecks(RDGeom::PointPtrVect *positions,
   RDUNUSED_PARAM(embedParams);
   // "distance matrix" chirality test
   std::set<int> atoms;
-  for (const auto chiralSet : *eargs.chiralCenters) {
+  for (const auto &chiralSet : *eargs.chiralCenters) {
     if (chiralSet->d_idx0 != chiralSet->d_idx4) {
       atoms.insert(chiralSet->d_idx0);
       atoms.insert(chiralSet->d_idx1);
@@ -662,7 +669,7 @@ bool finalChiralChecks(RDGeom::PointPtrVect *positions,
   }
 
   // "center in volume" chirality test
-  for (const auto chiralSet : *eargs.chiralCenters) {
+  for (const auto &chiralSet : *eargs.chiralCenters) {
     // it could happen that the centroid is outside the volume defined
     // by the other four points. That is also a fail.
     if (!_centerInVolume(chiralSet, *positions)) {
@@ -711,6 +718,9 @@ bool embedPoints(RDGeom::PointPtrVect *positions, detail::EmbedArgs eargs,
   unsigned int iter = 0;
   while ((gotCoords == false) && (iter < embedParams.maxIterations)) {
     ++iter;
+    if (embedParams.callback != nullptr) {
+      embedParams.callback(iter);
+    }
     gotCoords = EmbeddingOps::generateInitialCoords(positions, eargs,
                                                     embedParams, distMat, rng);
 #ifdef DEBUG_EMBEDDING
@@ -871,9 +881,11 @@ bool setupInitialBoundsMatrix(
   unsigned int nAtoms = mol->getNumAtoms();
   if (params.useExpTorsionAnglePrefs || params.useBasicKnowledge) {
     setTopolBounds(*mol, mmat, etkdgDetails.bonds, etkdgDetails.angles, true,
-                   false, params.useMacrocycle14config);
+                   false, params.useMacrocycle14config,
+                   params.forceTransAmides);
   } else {
-    setTopolBounds(*mol, mmat, true, false, params.useMacrocycle14config);
+    setTopolBounds(*mol, mmat, true, false, params.useMacrocycle14config,
+                   params.forceTransAmides);
   }
   double tol = 0.0;
   if (coordMap) {
@@ -884,7 +896,8 @@ bool setupInitialBoundsMatrix(
     // ok this bound matrix failed to triangle smooth - re-compute the
     // bounds matrix without 15 bounds and with VDW scaling
     initBoundsMat(mmat);
-    setTopolBounds(*mol, mmat, false, true, params.useMacrocycle14config);
+    setTopolBounds(*mol, mmat, false, true, params.useMacrocycle14config,
+                   params.forceTransAmides);
 
     if (coordMap) {
       adjustBoundsMatFromCoordMap(mmat, nAtoms, coordMap);
@@ -896,7 +909,8 @@ bool setupInitialBoundsMatrix(
       if (params.ignoreSmoothingFailures) {
         // proceed anyway with the more relaxed bounds matrix
         initBoundsMat(mmat);
-        setTopolBounds(*mol, mmat, false, true, params.useMacrocycle14config);
+        setTopolBounds(*mol, mmat, false, true, params.useMacrocycle14config,
+                       params.forceTransAmides);
 
         if (coordMap) {
           adjustBoundsMatFromCoordMap(mmat, nAtoms, coordMap);
@@ -913,37 +927,38 @@ bool setupInitialBoundsMatrix(
 }  // namespace EmbeddingOps
 
 void _fillAtomPositions(RDGeom::Point3DConstPtrVect &pts, const Conformer &conf,
-                        const ROMol &mol, bool onlyHeavyAtomsForRMS) {
-  unsigned int na = conf.getNumAtoms();
-  pts.clear();
-  pts.reserve(na);
-  for (const auto &atom : mol.atoms()) {
-    // FIX: should we include D and T here?
-    if (onlyHeavyAtomsForRMS && atom->getAtomicNum() == 1) {
-      continue;
-    }
-    pts.push_back(&conf.getAtomPos(atom->getIdx()));
+                        const ROMol &mol,
+                        const std::vector<unsigned int> &match) {
+  RDUNUSED_PARAM(mol);
+  PRECONDITION(pts.size() == match.size(), "bad pts size");
+  for (unsigned int i = 0; i < match.size(); i++) {
+    pts[i] = &conf.getAtomPos(match[i]);
   }
 }
 
-bool _isConfFarFromRest(const ROMol &mol, const Conformer &conf,
-                        double threshold, bool onlyHeavyAtomsForRMS) {
+bool _isConfFarFromRest(
+    const ROMol &mol, const Conformer &conf, double threshold,
+    const std::vector<std::vector<unsigned int>> &selfMatches) {
   // NOTE: it is tempting to use some triangle inequality to prune
   // conformations here but some basic testing has shown very
   // little advantage and given that the time for pruning fades in
   // comparison to embedding - we will use a simple for loop below
   // over all conformation until we find a match
-  RDGeom::Point3DConstPtrVect refPoints, prbPoints;
-  _fillAtomPositions(refPoints, conf, mol, onlyHeavyAtomsForRMS);
+  RDGeom::Point3DConstPtrVect refPoints(selfMatches[0].size());
+  RDGeom::Point3DConstPtrVect prbPoints(selfMatches[0].size());
+  _fillAtomPositions(refPoints, conf, mol, selfMatches[0]);
 
   double ssrThres = conf.getNumAtoms() * threshold * threshold;
-  for (auto confi = mol.beginConformers(); confi != mol.endConformers();
-       ++confi) {
-    _fillAtomPositions(prbPoints, *(*confi), mol, onlyHeavyAtomsForRMS);
-    RDGeom::Transform3D trans;
-    auto ssr = RDNumeric::Alignments::AlignPoints(refPoints, prbPoints, trans);
-    if (ssr < ssrThres) {
-      return false;
+  for (const auto &match : selfMatches) {
+    for (auto confi = mol.beginConformers(); confi != mol.endConformers();
+         ++confi) {
+      _fillAtomPositions(prbPoints, *(*confi), mol, match);
+      RDGeom::Transform3D trans;
+      auto ssr =
+          RDNumeric::Alignments::AlignPoints(refPoints, prbPoints, trans);
+      if (ssr < ssrThres) {
+        return false;
+      }
     }
   }
   return true;
@@ -969,12 +984,19 @@ void embedHelper_(int threadId, int numThreads, EmbedArgs *eargs,
   PRECONDITION(params, "bogus params");
   unsigned int nAtoms = eargs->mmat->numRows();
   RDGeom::PointPtrVect positions(nAtoms);
+  // we might thrown an exception in a callback
+  // in order to avoid leaking the points we're working with
+  // allocate them with unique_ptrs and then work with the naked
+  // pointers from those
+  std::vector<std::unique_ptr<RDGeom::Point>> positionsStore;
+  positionsStore.reserve(nAtoms);
   for (unsigned int i = 0; i < nAtoms; ++i) {
     if (eargs->fourD) {
-      positions[i] = new RDGeom::PointND(4);
+      positionsStore.emplace_back(new RDGeom::PointND(4));
     } else {
-      positions[i] = new RDGeom::Point3D();
+      positionsStore.emplace_back(new RDGeom::Point3D());
     }
+    positions[i] = positionsStore[i].get();
   }
   for (size_t ci = 0; ci < eargs->confs->size(); ci++) {
     if (rdcast<int>(ci % numThreads) != threadId) {
@@ -1022,7 +1044,7 @@ void embedHelper_(int threadId, int numThreads, EmbedArgs *eargs,
 
     // copy the coordinates into the correct conformer
     if (gotCoords) {
-      Conformer *conf = (*eargs->confs)[ci];
+      auto &conf = (*eargs->confs)[ci];
       unsigned int fragAtomIdx = 0;
       for (unsigned int i = 0; i < conf->getNumAtoms(); ++i) {
         if (!eargs->fragMapping ||
@@ -1037,10 +1059,50 @@ void embedHelper_(int threadId, int numThreads, EmbedArgs *eargs,
       (*eargs->confsOk)[ci] = 0;
     }
   }
-  for (unsigned int i = 0; i < nAtoms; ++i) {
-    delete positions[i];
-  }
 }
+
+std::vector<std::vector<unsigned int>> getMolSelfMatches(
+    const ROMol &mol, const EmbedParameters &params) {
+  std::vector<std::vector<unsigned int>> res;
+  if (params.pruneRmsThresh && params.useSymmetryForPruning) {
+    RWMol tmol(mol);
+    MolOps::RemoveHsParameters ps;
+    bool sanitize = false;
+    MolOps::removeHs(tmol, ps, sanitize);
+    SubstructMatchParameters sssps;
+    sssps.maxMatches = 1;
+    // provides the atom indices in the molecule corresponding
+    // to the indices in the H-stripped version
+    auto strippedMatch = SubstructMatch(mol, tmol, sssps);
+    CHECK_INVARIANT(strippedMatch.size() == 1, "expected match not found");
+
+    sssps.maxMatches = 1000;
+    sssps.uniquify = false;
+    auto heavyAtomMatches = SubstructMatch(tmol, tmol, sssps);
+    for (const auto &match : heavyAtomMatches) {
+      res.emplace_back(0);
+      res.back().reserve(match.size());
+      for (auto midx : match) {
+        res.back().push_back(strippedMatch[0][midx.second].second);
+      }
+    }
+  } else if (params.onlyHeavyAtomsForRMS) {
+    res.emplace_back(0);
+    for (const auto &at : mol.atoms()) {
+      if (at->getAtomicNum() != 1) {
+        res.back().push_back(at->getIdx());
+      }
+    }
+  } else {
+    res.emplace_back(0);
+    res.back().reserve(mol.getNumAtoms());
+    for (unsigned int i = 0; i < mol.getNumAtoms(); ++i) {
+      res.back().push_back(i);
+    }
+  }
+  return res;
+}
+
 }  // end of namespace detail
 
 void EmbedMultipleConfs(ROMol &mol, INT_VECT &res, unsigned int numConfs,
@@ -1054,14 +1116,21 @@ void EmbedMultipleConfs(ROMol &mol, INT_VECT &res, unsigned int numConfs,
         "torsion-angle preferences (ETversion) supported");
   }
 
+  if (MolOps::needsHs(mol)) {
+    BOOST_LOG(rdWarningLog)
+        << "Molecule does not have explicit Hs. Consider calling AddHs()"
+        << std::endl;
+  }
+
   // initialize the conformers we're going to be creating:
   if (params.clearConfs) {
     res.clear();
     mol.clearConformers();
   }
-  std::vector<Conformer *> confs(numConfs);
+  std::vector<std::unique_ptr<Conformer>> confs;
+  confs.reserve(numConfs);
   for (unsigned int i = 0; i < numConfs; ++i) {
-    confs[i] = new Conformer(mol.getNumAtoms());
+    confs.emplace_back(new Conformer(mol.getNumAtoms()));
   }
 
   boost::dynamic_bitset<> confsOk(numConfs);
@@ -1164,21 +1233,17 @@ void EmbedMultipleConfs(ROMol &mol, INT_VECT &res, unsigned int numConfs,
     }
 #endif
   }
+  auto selfMatches = detail::getMolSelfMatches(mol, params);
   for (unsigned int ci = 0; ci < confs.size(); ++ci) {
-    Conformer *conf = confs[ci];
+    auto &conf = confs[ci];
     if (confsOk[ci]) {
       // check if we are pruning away conformations and
       // a close-by conformation has already been chosen :
-      if (params.pruneRmsThresh > 0.0 &&
-          !_isConfFarFromRest(mol, *conf, params.pruneRmsThresh,
-                              params.onlyHeavyAtomsForRMS)) {
-        delete conf;
-      } else {
-        int confId = (int)mol.addConformer(conf, true);
+      if (params.pruneRmsThresh <= 0.0 ||
+          _isConfFarFromRest(mol, *conf, params.pruneRmsThresh, selfMatches)) {
+        int confId = (int)mol.addConformer(conf.release(), true);
         res.push_back(confId);
       }
-    } else {
-      delete conf;
     }
   }
 }

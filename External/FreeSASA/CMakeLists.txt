@@ -1,6 +1,6 @@
-if(RDK_BUILD_FREESASA_SUPPORT)
-
-add_definitions("-DRDKIT_FREESASALIB_BUILD")
+if(NOT RDK_BUILD_FREESASA_SUPPORT)
+  return()
+endif(NOT RDK_BUILD_FREESASA_SUPPORT)
 
 if(NOT DEFINED FREESASA_DIR)
   set(FREESASA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/freesasa")
@@ -28,17 +28,7 @@ if(needDownload)
   endif()
 endif()
 
-macro(use_c99)
-  if (CMAKE_VERSION VERSION_LESS "3.1")
-    if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
-      set (CMAKE_C_FLAGS "--std=gnu99 ${CMAKE_C_FLAGS}")
-    endif ()
-  else ()
-    set (CMAKE_C_STANDARD 99)
-  endif ()
-endmacro(use_c99)
-
-use_c99()
+set(CMAKE_C_STANDARD 99)
 
 set (freesasa_clib_srcs
     ${FREESASA_SRC_DIR}/src/classifier.c
@@ -85,20 +75,22 @@ add_definitions(-DUSE_THREADS=0)
 add_definitions(-DUSE_JSON=0)
 add_definitions(-DUSE_XML=0)
 rdkit_library(freesasa_clib ${freesasa_clib_srcs})
+target_compile_definitions(freesasa_clib PRIVATE RDKIT_FREESASALIB_BUILD)
+
 if((MSVC AND RDK_INSTALL_DLLS_MSVC) OR ((NOT MSVC) AND WIN32))
   set_target_properties(freesasa_clib PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
 endif()
 include_directories("${FREESASA_SRC_DIR}/src")
 
-rdkit_library(FreeSASALib RDFreeSASA.cpp SHARED LINK_LIBRARIES freesasa_clib GraphMol DataStructs RDGeometryLib RDGeneral )
+rdkit_library(FreeSASALib RDFreeSASA.cpp SHARED 
+    LINK_LIBRARIES freesasa_clib GraphMol )
+target_compile_definitions(FreeSASALib PRIVATE RDKIT_FREESASALIB_BUILD)
+
 rdkit_headers(RDFreeSASA.h DEST GraphMol)
 
 rdkit_test(testFreeSASALib testFreeSASA.cpp
-           LINK_LIBRARIES FreeSASALib freesasa_clib FileParsers SmilesParse
-                          GraphMol DataStructs RDGeometryLib RDGeneral)
+           LINK_LIBRARIES FreeSASALib FileParsers SmilesParse )
 
 if(RDK_BUILD_PYTHON_WRAPPERS)
 add_subdirectory(Wrap)
 endif()
-
-endif(RDK_BUILD_FREESASA_SUPPORT)

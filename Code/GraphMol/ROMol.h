@@ -15,8 +15,8 @@
 */
 
 #include <RDGeneral/export.h>
-#ifndef __RD_ROMOL_H__
-#define __RD_ROMOL_H__
+#ifndef RD_ROMOL_H
+#define RD_ROMOL_H
 
 /// Std stuff
 #include <utility>
@@ -26,6 +26,7 @@
 #include <RDGeneral/BoostStartInclude.h>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/smart_ptr.hpp>
+#include <boost/dynamic_bitset.hpp>
 #include <RDGeneral/BoostEndInclude.h>
 
 // our stuff
@@ -267,7 +268,7 @@ class RDKIT_GRAPHMOL_EXPORT ROMol : public RDProps {
     return {&d_graph};
   }
 
-  ROMol() : RDProps(), numBonds(0) { initMol(); }
+  ROMol() : RDProps() { initMol(); }
 
   //! copy constructor with a twist
   /*!
@@ -282,7 +283,7 @@ class RDKIT_GRAPHMOL_EXPORT ROMol : public RDProps {
   */
   ROMol(const ROMol &other, bool quickCopy = false, int confId = -1)
       : RDProps() {
-    dp_ringInfo = 0;
+    dp_ringInfo = nullptr;
     initFromOther(other, quickCopy, confId);
     numBonds = rdcast<unsigned int>(boost::num_edges(d_graph));
   };
@@ -296,7 +297,10 @@ class RDKIT_GRAPHMOL_EXPORT ROMol : public RDProps {
   //@{
 
   //! returns our number of atoms
-  unsigned int getNumAtoms(bool onlyExplicit = 1) const;
+  inline unsigned int getNumAtoms() const {
+    return rdcast<unsigned int>(boost::num_vertices(d_graph));
+  };
+  unsigned int getNumAtoms(bool onlyExplicit) const;
   //! returns our number of heavy atoms (atomic number > 1)
   unsigned int getNumHeavyAtoms() const;
   //! returns a pointer to a particular Atom
@@ -667,21 +671,24 @@ class RDKIT_GRAPHMOL_EXPORT ROMol : public RDProps {
   MolGraph d_graph;
   ATOM_BOOKMARK_MAP d_atomBookmarks;
   BOND_BOOKMARK_MAP d_bondBookmarks;
-  RingInfo *dp_ringInfo;
+  RingInfo *dp_ringInfo = nullptr;
   CONF_SPTR_LIST d_confs;
   std::vector<SubstanceGroup> d_sgroups;
+  std::vector<StereoGroup> d_stereo_groups;
+  std::unique_ptr<boost::dynamic_bitset<>> dp_delAtoms = nullptr;
+  std::unique_ptr<boost::dynamic_bitset<>> dp_delBonds = nullptr;
+
   friend RDKIT_GRAPHMOL_EXPORT std::vector<SubstanceGroup> &getSubstanceGroups(
       ROMol &);
   friend RDKIT_GRAPHMOL_EXPORT const std::vector<SubstanceGroup>
       &getSubstanceGroups(const ROMol &);
   void clearSubstanceGroups() { d_sgroups.clear(); }
-  std::vector<StereoGroup> d_stereo_groups;
 
   ROMol &operator=(
       const ROMol &);  // disable assignment, RWMol's support assignment
 
  protected:
-  unsigned int numBonds;
+  unsigned int numBonds{0};
 #ifndef WIN32
  private:
 #endif

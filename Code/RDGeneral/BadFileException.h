@@ -18,7 +18,7 @@
 namespace RDKit {
 
 //! used by various file parsing classes to indicate a bad file
-class BadFileException : public std::runtime_error {
+class RDKIT_RDGENERAL_EXPORT BadFileException : public std::runtime_error {
  public:
   //! construct with an error message
   explicit BadFileException(const char *msg)
@@ -28,7 +28,6 @@ class BadFileException : public std::runtime_error {
       : std::runtime_error("BadFileException"), _msg(msg){};
   //! get the error message
   const char *what() const noexcept override { return _msg.c_str(); };
-  const char *message() const noexcept { return what(); };
   ~BadFileException() noexcept {};
 
  private:

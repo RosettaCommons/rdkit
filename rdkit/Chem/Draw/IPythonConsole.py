@@ -30,10 +30,8 @@ try:
 except ImportError:
   _canUse3D = False
 
-try:
-  import Image
-except ImportError:
-  from PIL import Image
+from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 
 molSize = (450, 150)
 highlightSubstructs = True
@@ -124,11 +122,9 @@ def _toSVG(mol):
 
 def _toReactionPNG(rxn):
   rc = copy.deepcopy(rxn)
-  img = Draw.ReactionToImage(rc, subImgSize=(int(molSize[0] / 3), molSize[1]),
-                             highlightByReactant=highlightByReactant, drawOptions=drawOptions)
-  bio = BytesIO()
-  img.save(bio, format='PNG')
-  return bio.getvalue()
+  return Draw.ReactionToImage(rc, subImgSize=(int(molSize[0] / 3), molSize[1]),
+                              highlightByReactant=highlightByReactant, drawOptions=drawOptions,
+                              returnPNG=True)
 
 
 def _toReactionSVG(rxn):
@@ -166,18 +162,26 @@ _GetSubstructMatches.__doc__ = rdchem.Mol.GetSubstructMatches.__doc__
 # code for displaying PIL images directly,
 def display_pil_image(img):
   """displayhook function for PIL Images, rendered as PNG"""
+  # pull metadata from the image, if there
+  metadata = PngInfo()
+  for k, v in img.info.items():
+    metadata.add_text(k, v)
   bio = BytesIO()
-  img.save(bio, format='PNG')
+  img.save(bio, format='PNG', pnginfo=metadata)
   return bio.getvalue()
 
 
 _MolsToGridImageSaved = None
+
+from IPython import display
 
 
 def ShowMols(mols, maxMols=50, **kwargs):
   global _MolsToGridImageSaved
   if 'useSVG' not in kwargs:
     kwargs['useSVG'] = ipython_useSVG
+  if 'returnPNG' not in kwargs:
+    kwargs['returnPNG'] = True
   if _MolsToGridImageSaved is not None:
     fn = _MolsToGridImageSaved
   else:
@@ -190,11 +194,16 @@ def ShowMols(mols, maxMols=50, **kwargs):
     for prop in ('legends', 'highlightAtoms', 'highlightBonds'):
       if prop in kwargs:
         kwargs[prop] = kwargs[prop][:maxMols]
-  res = fn(mols, drawOptions=drawOptions, **kwargs)
+  if not "drawOptions" in kwargs:
+    kwargs["drawOptions"] = drawOptions
+  res = fn(mols, **kwargs)
   if kwargs['useSVG']:
     return SVG(res)
   else:
-    return res
+    if kwargs['returnPNG']:
+      return display.Image(data=res, format='png')
+    else:
+      return res
 
 
 ShowMols.__doc__ = Draw.MolsToGridImage.__doc__
@@ -356,4 +365,3 @@ def UninstallIPythonRenderer():
     rdchem.Mol.Debug = rdchem.Mol.__DebugMol
     del rdchem.Mol.__DebugMol
   _rendererInstalled = False
-

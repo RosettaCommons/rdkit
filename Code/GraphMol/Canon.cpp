@@ -350,10 +350,25 @@ void canonicalizeDoubleBond(Bond *dblBond, UINT_VECT &bondVisitOrders,
     // If we're not looking at the bonds used to determine the
     // stereochemistry, we need to flip the setting on the other bond:
     const INT_VECT &stereoAtoms = dblBond->getStereoAtoms();
+
+    auto isClosingRingBond = [](Bond *bond) {
+      if (bond == nullptr) {
+        return false;
+      }
+      auto beginIdx = bond->getBeginAtomIdx();
+      auto endIdx = bond->getEndAtomIdx();
+      return beginIdx > endIdx && 
+             beginIdx - endIdx > 1 &&
+             bond->hasProp(common_properties::_TraversalRingClosureBond);
+    };
+
+    auto isFlipped = false;
+
     if (atom1->getDegree() == 3 &&
         std::find(stereoAtoms.begin(), stereoAtoms.end(),
                   static_cast<int>(atom1ControllingBond->getOtherAtomIdx(
                       atom1->getIdx()))) == stereoAtoms.end()) {
+      isFlipped = true;
       atom2Dir = (atom2Dir == Bond::ENDUPRIGHT) ? Bond::ENDDOWNRIGHT
                                                 : Bond::ENDUPRIGHT;
     }
@@ -363,6 +378,17 @@ void canonicalizeDoubleBond(Bond *dblBond, UINT_VECT &bondVisitOrders,
         std::find(stereoAtoms.begin(), stereoAtoms.end(),
                   static_cast<int>(firstFromAtom2->getOtherAtomIdx(
                       atom2->getIdx()))) == stereoAtoms.end()) {
+      isFlipped = true;
+      atom2Dir = (atom2Dir == Bond::ENDUPRIGHT) ? Bond::ENDDOWNRIGHT
+                                                : Bond::ENDUPRIGHT;
+    } 
+    
+    if (!isFlipped && 
+          (isClosingRingBond(dblBond) ||
+          (isClosingRingBond(secondFromAtom1) && 
+            !secondFromAtom1->getIsAromatic() && 
+            secondFromAtom1->getBondDir() != Bond::NONE))
+        ) {
       atom2Dir = (atom2Dir == Bond::ENDUPRIGHT) ? Bond::ENDDOWNRIGHT
                                                 : Bond::ENDUPRIGHT;
     }
@@ -627,7 +653,7 @@ void dfsFindCycles(ROMol &mol, int atomIdx, int inBondIdx,
       // std::cerr<<"aIdx: "<< atomIdx <<"   p: "<<otherIdx<<" Rank:
       // "<<ranks[otherIdx] <<" "<<colors[otherIdx]<<"
       // "<<theBond->getBondType()<<" "<<rank<<std::endl;
-      possibles.push_back(PossibleType(rank, otherIdx, theBond));
+      possibles.emplace_back(rank, otherIdx, theBond);
     }
   }
 
@@ -798,7 +824,7 @@ void dfsBuildStack(ROMol &mol, int atomIdx, int inBondIdx,
         rank = getRandomGenerator()();
       }
 
-      possibles.push_back(PossibleType(rank, otherIdx, theBond));
+      possibles.emplace_back(rank, otherIdx, theBond);
     }
   }
 
@@ -829,8 +855,6 @@ void dfsBuildStack(ROMol &mol, int atomIdx, int inBondIdx,
     }
     Bond *bond = possiblesIt->get<2>();
     Atom *otherAtom = mol.getAtomWithIdx(possibleIdx);
-    // unsigned int lowestRingIdx;
-    INT_VECT::const_iterator cAIt;
     // ww might have some residual data from earlier calls, clean that up:
     otherAtom->clearProp(common_properties::_TraversalBondIndexOrder);
     travList.push_back(bond->getIdx());

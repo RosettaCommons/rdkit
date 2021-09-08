@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2006-2018 Greg Landrum
+//  Copyright (C) 2006-2020 Greg Landrum
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -15,6 +15,7 @@
 #include <iostream>
 #include <GraphMol/SmilesParse/SmilesParse.h>
 #include <GraphMol/SmilesParse/SmilesWrite.h>
+#include <GraphMol/SmilesParse/SmartsWrite.h>
 #include <GraphMol/ChemTransforms/ChemTransforms.h>
 #include <GraphMol/FileParsers/FileParsers.h>
 #include <GraphMol/FileParsers/MolSupplier.h>
@@ -1884,7 +1885,7 @@ void testGithubIssue429() {
     TEST_ASSERT(frags.size() == 2);
     std::vector<std::vector<int>> fragMap;
 
-    BOOST_FOREACH (ROMOL_SPTR romol, frags) {
+    for (auto romol : frags) {
       auto *rwmol = (RWMol *)(romol.get());
       MolOps::sanitizeMol(*rwmol);
     }
@@ -2042,6 +2043,99 @@ void testGithub1734() {
   BOOST_LOG(rdInfoLog) << "\tdone" << std::endl;
 }
 
+void testGithub3206() {
+  BOOST_LOG(rdInfoLog) << "-------------------------------------" << std::endl;
+  BOOST_LOG(rdInfoLog) << "Testing GitHub #3206: Queries generated from "
+                          "PreprocessReaction cannot be translated to SMARTS"
+                       << std::endl;
+
+  {
+    auto mol1 = "CC"_smiles;
+
+    std::map<std::string, ROMOL_SPTR> mp;
+    mp["foo"] = ROMOL_SPTR(SmilesToMol("CO"));
+    mp["bar"] = ROMOL_SPTR(SmilesToMol("CN"));
+    mp["baz"] = ROMOL_SPTR(SmilesToMol("CF"));
+
+    TEST_ASSERT(!mol1->getAtomWithIdx(0)->hasQuery());
+    addRecursiveQueries(*mol1, mp, "replaceme");
+    TEST_ASSERT(!mol1->getAtomWithIdx(0)->hasQuery());
+    mol1->getAtomWithIdx(0)->setProp("replaceme", "foo,bar,baz");
+    addRecursiveQueries(*mol1, mp, "replaceme");
+    TEST_ASSERT(mol1->getAtomWithIdx(0)->hasQuery());
+    TEST_ASSERT(mol1->getAtomWithIdx(0)->getQuery()->getDescription() ==
+                "AtomAnd");
+    TEST_ASSERT(!mol1->getAtomWithIdx(1)->hasQuery());
+
+    auto sma = MolToSmarts(*mol1);
+    TEST_ASSERT(sma == "[#6;$([#6]-[#8]),$([#6]-[#7]),$([#6]-[#9])]-[#6]");
+  }
+  BOOST_LOG(rdInfoLog) << "\tdone" << std::endl;
+}
+
+void testGithub4019() {
+  BOOST_LOG(rdInfoLog) << "-------------------------------------" << std::endl;
+  BOOST_LOG(rdInfoLog)
+      << "Testing GitHub #4019: dummy atoms should not be marked "
+      << "as aromatic, not have explicit Hs, not "
+      << "be bonded through an aromatic bond and "
+      << "not be bonded with each other" << std::endl;
+  {
+    auto mol = "c1ncccc1n1ccc2ccccc12"_smiles;
+    ROMOL_SPTR core(SmartsToMol("n1ccc2ccccc12"));
+    ROMOL_SPTR molNoSidechain(replaceSidechains(*mol, *core));
+    bool hasDummy = false;
+    for (auto a : molNoSidechain->atoms()) {
+      if (a->getAtomicNum() == 0) {
+        hasDummy = true;
+        TEST_ASSERT(!a->getIsAromatic());
+        a->setAtomicNum(1);
+        a->setIsotope(0);
+      }
+    }
+    TEST_ASSERT(hasDummy);
+    molNoSidechain.reset(MolOps::removeHs(*molNoSidechain));
+    TEST_ASSERT(MolToSmiles(*molNoSidechain) == "c1ccc2[nH]ccc2c1");
+  }
+  {
+    auto mol = "c1ccc2[nH]ccc2c1"_smiles;
+    ROMOL_SPTR core(SmartsToMol("c1ccccc1"));
+    ROMOL_SPTR molNoSidechain(replaceSidechains(*mol, *core));
+    unsigned int nDummies = 0;
+    for (auto a : molNoSidechain->atoms()) {
+      if (a->getAtomicNum() == 0) {
+        ++nDummies;
+        TEST_ASSERT(!a->getIsAromatic());
+        TEST_ASSERT(!a->getNumExplicitHs());
+      }
+    }
+    TEST_ASSERT(nDummies == 2);
+    for (auto b : molNoSidechain->bonds()) {
+      if (b->getBeginAtom()->getAtomicNum() == 0 ||
+          b->getEndAtom()->getAtomicNum() == 0) {
+        TEST_ASSERT(!b->getIsAromatic());
+        TEST_ASSERT(b->getBondType() == Bond::SINGLE);
+      }
+    }
+  }
+  {
+    auto mol = "c1ccccc1C1CC1"_smiles;
+    ROMOL_SPTR core(SmartsToMol("c1ccccc1C"));
+    ROMOL_SPTR molNoSidechain(replaceSidechains(*mol, *core));
+    std::vector<unsigned int> dummies;
+    for (auto a : molNoSidechain->atoms()) {
+      if (a->getAtomicNum() == 0) {
+        dummies.push_back(a->getIdx());
+        TEST_ASSERT(!a->getIsAromatic());
+        TEST_ASSERT(!a->getNumExplicitHs());
+      }
+    }
+    TEST_ASSERT(dummies.size() == 2);
+    TEST_ASSERT(
+        !molNoSidechain->getBondBetweenAtoms(dummies.front(), dummies.back()));
+  }
+}
+
 int main() {
   RDLog::InitLogs();
 
@@ -2081,6 +2175,8 @@ int main() {
   testReplaceCore2();
 #endif
   testGithub1734();
+  testGithub3206();
+  testGithub4019();
   BOOST_LOG(rdInfoLog)
       << "*******************************************************\n";
   return (0);
