@@ -631,4 +631,7 @@ int main(int argc, char* argv[]) {
   test1();
   testGithub1929();
   testGithub3131();
+#endif
+  testCoordgenMinimize();
+  testZOBs();
 }
