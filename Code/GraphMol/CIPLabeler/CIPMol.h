@@ -26,7 +26,7 @@ public:
   class CIPMolIter {
   public:
     CIPMolIter() = delete;
-    CIPMolIter(ROMol &mol, U pos) : d_mol{mol}, d_pos{std::move(pos)} {}
+    CIPMolIter(ROMol &mol, U pos) : d_mol(mol), d_pos{std::move(pos)} {}
 
     T &operator*() {
       d_current = d_mol[*d_pos];
