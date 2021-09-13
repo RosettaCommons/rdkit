@@ -49,7 +49,7 @@ public:
 public:
   CIPMolSpan() = delete;
   CIPMolSpan(ROMol &mol, std::pair<U, U> &&itr)
-      : d_mol{mol}, d_istart{std::move(itr.first)},
+      : d_mol(mol), d_istart{std::move(itr.first)},
         d_iend{std::move(itr.second)} {}
 
   CIPMolIter begin() { return {d_mol, d_istart}; }
