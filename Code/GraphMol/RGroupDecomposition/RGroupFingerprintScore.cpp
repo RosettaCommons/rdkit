@@ -11,7 +11,7 @@
 #include "RGroupFingerprintScore.h"
 #include "GraphMol/Fingerprints/Fingerprints.h"
 #include "GraphMol//Fingerprints/MorganFingerprints.h"
-#include "../../../External/GA/util/Util.h"
+#include "External/GA/util/Util.h"
 #include <memory>
 #include <vector>
 #include <map>

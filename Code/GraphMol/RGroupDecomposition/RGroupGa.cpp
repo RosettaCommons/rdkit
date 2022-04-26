@@ -18,7 +18,7 @@
 #include "RGroupDecompData.h"
 #include "RGroupDecomp.h"
 #include "RGroupFingerprintScore.h"
-#include "../../../External/GA/util/Util.h"
+#include "External/GA/util/Util.h"
 
 // #define DEBUG
 
