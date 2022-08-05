@@ -957,7 +957,7 @@ std::unique_ptr<ROMol> molzip(const ROMol &a, const ROMol &b,
   }
   newmol->updatePropertyCache();
   newmol->setProp(common_properties::_StereochemDone, true);
-  return newmol;
+  return std::move(newmol); // Needed to fix bug in Clang 3.4 compilation
 }
 
 std::unique_ptr<ROMol> molzip(const ROMol &a, const MolzipParams &params) {
