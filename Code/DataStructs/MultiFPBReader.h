@@ -22,7 +22,6 @@
 #include <DataStructs/ExplicitBitVect.h>
 #include <DataStructs/FPBReader.h>
 #include <boost/tuple/tuple.hpp>
-#include <boost/foreach.hpp>
 
 namespace RDKit {
 
@@ -55,7 +54,7 @@ class RDKIT_DATASTRUCTS_EXPORT MultiFPBReader {
  public:
   typedef boost::tuple<double, unsigned int, unsigned int> ResultTuple;
   MultiFPBReader()
-      : df_init(false), df_initOnSearch(false), df_takeOwnership(false){};
+       {};
 
   /*!
     \param initOnSearch: if this is true, the \c init() method on child readers
@@ -79,7 +78,7 @@ class RDKIT_DATASTRUCTS_EXPORT MultiFPBReader {
   ~MultiFPBReader() {
     df_init = false;
     if (df_takeOwnership) {
-      BOOST_FOREACH (FPBReader *rdr, d_readers) { delete rdr; };
+      for (auto& rdr : d_readers) { delete rdr; };
       d_readers.clear();
     }
   };
@@ -198,7 +197,7 @@ class RDKIT_DATASTRUCTS_EXPORT MultiFPBReader {
 
  private:
   std::vector<FPBReader *> d_readers;
-  bool df_init, df_initOnSearch, df_takeOwnership;
+  bool df_init{false}, df_initOnSearch{false}, df_takeOwnership{false};
 
   // disable automatic copy constructors and assignment operators
   // for this class and its subclasses.  They will likely be

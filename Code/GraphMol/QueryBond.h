@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2001-2017 Greg Landrum and Rational Discovery LLC
+//  Copyright (C) 2001-2021 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -29,7 +29,7 @@ class RDKIT_GRAPHMOL_EXPORT QueryBond : public Bond {
  public:
   typedef Queries::Query<int, Bond const *, true> QUERYBOND_QUERY;
 
-  QueryBond() : Bond(), dp_query(NULL){};
+  QueryBond() : Bond(){};
   //! initialize with a particular bond order
   explicit QueryBond(BondType bT);
   //! initialize from a bond
@@ -57,7 +57,7 @@ class RDKIT_GRAPHMOL_EXPORT QueryBond : public Bond {
   bool QueryMatch(QueryBond const *what) const;
 
   // This method can be used to distinguish query bonds from standard bonds
-  bool hasQuery() const { return dp_query != 0; };
+  bool hasQuery() const { return dp_query != nullptr; };
 
   //! returns our current query
   QUERYBOND_QUERY *getQuery() const { return dp_query; };
@@ -90,8 +90,15 @@ class RDKIT_GRAPHMOL_EXPORT QueryBond : public Bond {
                    Queries::CompositeQueryType how = Queries::COMPOSITE_AND,
                    bool maintainOrder = true);
 
+  //! returns our contribution to the explicit valence of an Atom
+  /*!
+    <b>Notes:</b>
+      - requires an owning molecule
+  */
+  double getValenceContrib(const Atom *at) const override;
+
  protected:
-  QUERYBOND_QUERY *dp_query;
+  QUERYBOND_QUERY *dp_query{nullptr};
 };
 
 namespace detail {

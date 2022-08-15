@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2003-2016 Greg Landrum and Rational Discovery LLC
+//  Copyright (C) 2003-2021 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -7,8 +7,6 @@
 //  which is included in the file license.txt, found at the root
 //  of the RDKit source tree.
 //
-
-#include <boost/foreach.hpp>
 
 // our stuff
 #include <RDGeneral/Invariant.h>
@@ -52,7 +50,7 @@ void RWMol::insertMol(const ROMol &other) {
     // take care of atom-numbering-dependent properties:
     INT_VECT nAtoms;
     if (newAt->getPropIfPresent(common_properties::_ringStereoAtoms, nAtoms)) {
-      BOOST_FOREACH (int &val, nAtoms) {
+      for (auto &val : nAtoms) {
         if (val < 0) {
           val = -1 * (newAtomIds[(-val - 1)] + 1);
         } else {
@@ -73,13 +71,12 @@ void RWMol::insertMol(const ROMol &other) {
     bond_p->setOwningMol(this);
     bond_p->setBeginAtomIdx(idx1);
     bond_p->setEndAtomIdx(idx2);
-    BOOST_FOREACH (int &v, bond_p->getStereoAtoms()) { v = newAtomIds[v]; }
+    for (auto &v : bond_p->getStereoAtoms()) {
+      v = newAtomIds[v];
+    }
     addBond(bond_p, true);
     ++firstB;
   }
-
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
 
   // add atom to any conformers as well, if we have any
   if (other.getNumConformers() && !getNumConformers()) {
@@ -127,9 +124,6 @@ unsigned int RWMol::addAtom(bool updateLabel) {
     setAtomBookmark(atom_p, ci_RIGHTMOST_ATOM);
   }
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
-
   // add atom to any conformers as well, if we have any
   for (auto cfi = this->beginConformers(); cfi != this->endConformers();
        ++cfi) {
@@ -151,12 +145,20 @@ void RWMol::replaceAtom(unsigned int idx, Atom *atom_pin, bool updateLabel,
     const bool replaceExistingData = false;
     atom_p->updateProps(*d_graph[vd], replaceExistingData);
   }
-  delete d_graph[vd];
-  d_graph[vd] = atom_p;
-  // FIX: do something about bookmarks
+  removeSubstanceGroupsReferencingAtom(*this, idx);
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
+  const auto orig_p = d_graph[vd];
+  delete orig_p;
+  d_graph[vd] = atom_p;
+
+  // handle bookmarks
+  for (auto &ab : d_atomBookmarks) {
+    for (auto &elem : ab.second) {
+      if (elem == orig_p) {
+        elem = atom_p;
+      }
+    }
+  }
 };
 
 void RWMol::replaceBond(unsigned int idx, Bond *bond_pin, bool preserveProps) {
@@ -177,12 +179,19 @@ void RWMol::replaceBond(unsigned int idx, Bond *bond_pin, bool preserveProps) {
     bond_p->updateProps(*d_graph[*(bIter.first)], replaceExistingData);
   }
 
-  delete d_graph[*(bIter.first)];
+  const auto orig_p = d_graph[*(bIter.first)];
+  delete orig_p;
   d_graph[*(bIter.first)] = bond_p;
-  // FIX: do something about bookmarks
+  removeSubstanceGroupsReferencingBond(*this, idx);
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
+  // handle bookmarks
+  for (auto &ab : d_bondBookmarks) {
+    for (auto &elem : ab.second) {
+      if (elem == orig_p) {
+        elem = bond_p;
+      }
+    }
+  }
 };
 
 Atom *RWMol::getActiveAtom() {
@@ -194,6 +203,7 @@ Atom *RWMol::getActiveAtom() {
 };
 
 void RWMol::setActiveAtom(Atom *at) {
+  PRECONDITION(at, "NULL atom provided");
   clearAtomBookmark(ci_RIGHTMOST_ATOM);
   setAtomBookmark(at, ci_RIGHTMOST_ATOM);
 };
@@ -208,6 +218,15 @@ void RWMol::removeAtom(Atom *atom) {
   PRECONDITION(static_cast<RWMol *>(&atom->getOwningMol()) == this,
                "atom not owned by this molecule");
   unsigned int idx = atom->getIdx();
+  if (dp_delAtoms) {
+    // we're in a batch edit
+    // if atoms have been added since we started, resize dp_delAtoms
+    if (dp_delAtoms->size() < getNumAtoms()) {
+      dp_delAtoms->resize(getNumAtoms());
+    }
+    dp_delAtoms->set(idx);
+    return;
+  }
 
   // remove any bookmarks which point to this atom:
   ATOM_BOOKMARK_MAP *marks = getAtomBookmarks();
@@ -229,7 +248,7 @@ void RWMol::removeAtom(Atom *atom) {
   ADJ_ITER b1, b2;
   boost::tie(b1, b2) = getAtomNeighbors(atom);
   while (b1 != b2) {
-    nbrs.push_back(std::make_pair(atom->getIdx(), rdcast<unsigned int>(*b1)));
+    nbrs.emplace_back(atom->getIdx(), rdcast<unsigned int>(*b1));
     ++b1;
   }
   for (auto &nbr : nbrs) {
@@ -243,7 +262,7 @@ void RWMol::removeAtom(Atom *atom) {
   }
 
   // do the same with the coordinates in the conformations
-  BOOST_FOREACH (CONFORMER_SPTR conf, d_confs) {
+  for (auto conf : d_confs) {
     RDGeom::POINT3D_VECT &positions = conf->getPositions();
     auto pi = positions.begin();
     for (unsigned int i = 0; i < getNumAtoms() - 1; i++) {
@@ -282,8 +301,7 @@ void RWMol::removeAtom(Atom *atom) {
     }
   }
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
+  removeSubstanceGroupsReferencingAtom(*this, idx);
 
   // Remove any stereo group which includes the atom being deleted
   removeGroupsWithAtom(atom, d_stereo_groups);
@@ -341,9 +359,6 @@ unsigned int RWMol::addBond(unsigned int atomIdx1, unsigned int atomIdx2,
     dp_ringInfo->reset();
   }
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
-
   return numBonds;  // res;
 }
 
@@ -360,6 +375,15 @@ void RWMol::removeBond(unsigned int aid1, unsigned int aid2) {
     return;
   }
   unsigned int idx = bnd->getIdx();
+  if (dp_delBonds) {
+    // we're in a batch edit
+    // if bonds have been added since we started, resize dp_delBonds
+    if (dp_delBonds->size() < getNumBonds()) {
+      dp_delBonds->resize(getNumBonds());
+    }
+    dp_delBonds->set(idx);
+    return;
+  }
 
   // remove any bookmarks which point to this bond:
   BOND_BOOKMARK_MAP *marks = getBondBookmarks();
@@ -416,8 +440,7 @@ void RWMol::removeBond(unsigned int aid1, unsigned int aid2) {
   // to be wrong now:
   dp_ringInfo->reset();
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
+  removeSubstanceGroupsReferencingBond(*this, idx);
 
   // loop over all bonds with higher indices and update their indices
   ROMol::EDGE_ITER firstB, lastB;
@@ -445,9 +468,6 @@ Bond *RWMol::createPartialBond(unsigned int atomIdx1, Bond::BondType bondType) {
   b->setOwningMol(this);
   b->setBeginAtomIdx(atomIdx1);
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
-
   return b;
 }
 
@@ -461,10 +481,39 @@ unsigned int RWMol::finishPartialBond(unsigned int atomIdx2, int bondBookmark,
     bondType = bsp->getBondType();
   }
 
-  // SubstanceGroups do not tolerate modification of the molecule, so drop them
-  clearSubstanceGroups();
-
   return addBond(bsp->getBeginAtomIdx(), atomIdx2, bondType);
+}
+
+void RWMol::beginBatchEdit() {
+  if (dp_delAtoms || dp_delBonds) {
+    BOOST_LOG(rdWarningLog) << "batchEdit mode already enabled, ignoring "
+                               "additional call to beginBatchEdit()"
+                            << std::endl;
+    throw ValueErrorException("Attempt to re-enter batchEdit mode");
+  }
+  dp_delAtoms.reset(new boost::dynamic_bitset<>(getNumAtoms()));
+  dp_delBonds.reset(new boost::dynamic_bitset<>(getNumBonds()));
+}
+void RWMol::commitBatchEdit() {
+  if (!dp_delBonds || !dp_delAtoms) {
+    return;
+  }
+  auto delBonds = *dp_delBonds;
+  dp_delBonds.reset();
+  for (unsigned int i = delBonds.size(); i > 0; --i) {
+    if (delBonds[i - 1]) {
+      const auto bnd = getBondWithIdx(i - 1);
+      CHECK_INVARIANT(bnd, "bond not found");
+      removeBond(bnd->getBeginAtomIdx(), bnd->getEndAtomIdx());
+    }
+  }
+  auto delAtoms = *dp_delAtoms;
+  dp_delAtoms.reset();
+  for (unsigned int i = delAtoms.size(); i > 0; --i) {
+    if (delAtoms[i - 1]) {
+      removeAtom(i - 1);
+    }
+  }
 }
 
 }  // namespace RDKit

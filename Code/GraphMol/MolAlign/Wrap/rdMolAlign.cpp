@@ -28,70 +28,12 @@
 namespace python = boost::python;
 
 namespace RDKit {
-MatchVectType *_translateAtomMap(python::object atomMap) {
-  PySequenceHolder<python::object> aMapSeq(atomMap);
-  MatchVectType *aMap;
-  aMap = nullptr;
-  unsigned int i, nAtms = aMapSeq.size();
-  if (nAtms > 0) {
-    aMap = new MatchVectType;
-    for (i = 0; i < nAtms; ++i) {
-      PySequenceHolder<int> item(aMapSeq[i]);
-      if (item.size() != 2) {
-        delete aMap;
-        aMap = nullptr;
-        throw_value_error("Incorrect format for atomMap");
-      }
-      aMap->push_back(std::pair<int, int>(item[0], item[1]));
-    }
-  }
-  return aMap;
-}
-
-std::vector<MatchVectType> _translateAtomMapVector(python::object atomMapVec) {
-  std::vector<MatchVectType> aMapVec;
-  PySequenceHolder<python::object> aMapVecSeq(atomMapVec);
-  for (size_t i = 0; i < aMapVecSeq.size(); ++i) {
-    MatchVectType *aMap = _translateAtomMap(aMapVecSeq[i]);
-    aMapVec.push_back(*aMap);
-    delete aMap;
-  }
-  return aMapVec;
-}
-
-RDNumeric::DoubleVector *_translateWeights(python::object weights) {
-  PySequenceHolder<double> wts(weights);
-  unsigned int nwts = wts.size();
-  RDNumeric::DoubleVector *wtsVec;
-  wtsVec = nullptr;
-  unsigned int i;
-  if (nwts > 0) {
-    wtsVec = new RDNumeric::DoubleVector(nwts);
-    for (i = 0; i < nwts; i++) {
-      wtsVec->setVal(i, wts[i]);
-    }
-  }
-  return wtsVec;
-}
-
-std::vector<unsigned int> *_translateIds(python::object ids) {
-  PySequenceHolder<unsigned int> idsSeq(ids);
-  std::vector<unsigned int> *ivec = nullptr;
-  if (idsSeq.size() > 0) {
-    ivec = new std::vector<unsigned int>;
-    for (unsigned int i = 0; i < idsSeq.size(); ++i) {
-      ivec->push_back(idsSeq[i]);
-    }
-  }
-  return ivec;
-}
-
 void alignMolConfs(ROMol &mol, python::object atomIds, python::object confIds,
                    python::object weights, bool reflect, unsigned int maxIters,
                    python::object RMSlist) {
-  RDNumeric::DoubleVector *wtsVec = _translateWeights(weights);
-  std::vector<unsigned int> *aIds = _translateIds(atomIds);
-  std::vector<unsigned int> *cIds = _translateIds(confIds);
+  RDNumeric::DoubleVector *wtsVec = translateDoubleSeq(weights);
+  std::vector<unsigned int> *aIds = translateIntSeq(atomIds);
+  std::vector<unsigned int> *cIds = translateIntSeq(confIds);
   std::vector<double> *RMSvector = nullptr;
   if (RMSlist != python::object()) {
     RMSvector = new std::vector<double>();
@@ -146,14 +88,14 @@ PyObject *getMolAlignTransform(const ROMol &prbMol, const ROMol &refMol,
                                python::object weights = python::list(),
                                bool reflect = false,
                                unsigned int maxIters = 50) {
-  MatchVectType *aMap = _translateAtomMap(atomMap);
+  MatchVectType *aMap = translateAtomMap(atomMap);
   unsigned int nAtms;
   if (aMap) {
     nAtms = aMap->size();
   } else {
     nAtms = prbMol.getNumAtoms();
   }
-  RDNumeric::DoubleVector *wtsVec = _translateWeights(weights);
+  RDNumeric::DoubleVector *wtsVec = translateDoubleSeq(weights);
   if (wtsVec) {
     if (wtsVec->size() != nAtms) {
       throw_value_error("Incorrect number of weights specified");
@@ -180,14 +122,14 @@ double AlignMolecule(ROMol &prbMol, const ROMol &refMol, int prbCid = -1,
                      int refCid = -1, python::object atomMap = python::list(),
                      python::object weights = python::list(),
                      bool reflect = false, unsigned int maxIters = 50) {
-  MatchVectType *aMap = _translateAtomMap(atomMap);
+  MatchVectType *aMap = translateAtomMap(atomMap);
   unsigned int nAtms;
   if (aMap) {
     nAtms = aMap->size();
   } else {
     nAtms = prbMol.getNumAtoms();
   }
-  RDNumeric::DoubleVector *wtsVec = _translateWeights(weights);
+  RDNumeric::DoubleVector *wtsVec = translateDoubleSeq(weights);
   if (wtsVec) {
     if (wtsVec->size() != nAtms) {
       throw_value_error("Incorrect number of weights specified");
@@ -213,7 +155,7 @@ double GetBestRMS(ROMol &prbMol, ROMol &refMol, int prbId, int refId,
                   python::object map, int maxMatches) {
   std::vector<MatchVectType> aMapVec;
   if (map != python::object()) {
-    aMapVec = _translateAtomMapVector(map);
+    aMapVec = translateAtomMapSeq(map);
   }
 
   double rmsd;
@@ -221,6 +163,23 @@ double GetBestRMS(ROMol &prbMol, ROMol &refMol, int prbId, int refId,
     NOGIL gil;
     rmsd =
         MolAlign::getBestRMS(prbMol, refMol, prbId, refId, aMapVec, maxMatches);
+  }
+  return rmsd;
+}
+
+double CalcRMS(ROMol &prbMol, ROMol &refMol, int prbCid, int refCid,
+               python::object map, int maxMatches,
+               python::object weights = python::list()) {
+  std::vector<MatchVectType> aMapVec;
+  if (map != python::object()) {
+    aMapVec = translateAtomMapSeq(map);
+  }
+  RDNumeric::DoubleVector *wtsVec = translateDoubleSeq(weights);
+  double rmsd;
+  {
+    NOGIL gil;
+    rmsd =
+        MolAlign::CalcRMS(prbMol, refMol, prbCid, refCid, aMapVec, maxMatches, wtsVec);
   }
   return rmsd;
 }
@@ -270,10 +229,10 @@ PyO3A *getMMFFO3A(ROMol &prbMol, ROMol &refMol, python::object prbProps,
                   python::list constraintMap = python::list(),
                   python::list constraintWeights = python::list()) {
   MatchVectType *cMap =
-      (python::len(constraintMap) ? _translateAtomMap(constraintMap) : nullptr);
+      (python::len(constraintMap) ? translateAtomMap(constraintMap) : nullptr);
   RDNumeric::DoubleVector *cWts = nullptr;
   if (cMap) {
-    cWts = _translateWeights(constraintWeights);
+    cWts = translateDoubleSeq(constraintWeights);
     if (cWts) {
       if ((*cMap).size() != (*cWts).size()) {
         throw_value_error(
@@ -348,10 +307,10 @@ python::tuple getMMFFO3AForConfs(
     python::list constraintMap = python::list(),
     python::list constraintWeights = python::list()) {
   MatchVectType *cMap =
-      (python::len(constraintMap) ? _translateAtomMap(constraintMap) : nullptr);
+      (python::len(constraintMap) ? translateAtomMap(constraintMap) : nullptr);
   RDNumeric::DoubleVector *cWts = nullptr;
   if (cMap) {
-    cWts = _translateWeights(constraintWeights);
+    cWts = translateDoubleSeq(constraintWeights);
     if (cWts) {
       if ((*cMap).size() != (*cWts).size()) {
         throw_value_error(
@@ -431,10 +390,10 @@ PyO3A *getCrippenO3A(ROMol &prbMol, ROMol &refMol,
                      python::list constraintMap = python::list(),
                      python::list constraintWeights = python::list()) {
   MatchVectType *cMap =
-      (python::len(constraintMap) ? _translateAtomMap(constraintMap) : nullptr);
+      (python::len(constraintMap) ? translateAtomMap(constraintMap) : nullptr);
   RDNumeric::DoubleVector *cWts = nullptr;
   if (cMap) {
-    cWts = _translateWeights(constraintWeights);
+    cWts = translateDoubleSeq(constraintWeights);
     if (cWts) {
       if ((*cMap).size() != (*cWts).size()) {
         throw_value_error(
@@ -512,10 +471,10 @@ python::tuple getCrippenO3AForConfs(
     unsigned int options = 0, python::list constraintMap = python::list(),
     python::list constraintWeights = python::list()) {
   MatchVectType *cMap =
-      (python::len(constraintMap) ? _translateAtomMap(constraintMap) : nullptr);
+      (python::len(constraintMap) ? translateAtomMap(constraintMap) : nullptr);
   RDNumeric::DoubleVector *cWts = nullptr;
   if (cMap) {
-    cWts = _translateWeights(constraintWeights);
+    cWts = translateDoubleSeq(constraintWeights);
     if (cWts) {
       if ((*cMap).size() != (*cWts).size()) {
         throw_value_error(
@@ -699,19 +658,52 @@ BOOST_PYTHON_MODULE(rdMolAlign) {
       docString.c_str());
 
   docString =
+      "Returns the RMS between two molecules, taking symmetry into account.\n\
+      \n\
+       Note:\n\
+       This function will attempt to align all permutations of matching atom\n\
+       orders in both molecules, for some molecules it will lead to\n\
+       'combinatorial explosion' especially if hydrogens are present.\n\
+       Use 'rdkit.Chem.AllChem.AlignMol' to align molecules without changing\n\
+       the atom order.\n\
+      \n\
+       ARGUMENTS\n\
+        - prbMol:      the molecule to be aligned to the reference\n\
+        - refMol:      the reference molecule\n\
+        - prbId:       (optional) probe conformation to use\n\
+        - refId:       (optional) reference conformation to use\n\
+        - map:         (optional) a list of lists of (probeAtomId,refAtomId)\n\
+                       tuples with the atom-atom mappings of the two\n\
+                       molecules. If not provided, these will be generated\n\
+                       using a substructure search.\n\
+        - maxMatches:  (optional) if map isn't specified, this will be\n\
+                       the max number of matches found in a SubstructMatch()\n\
+        - weights:     (optional) weights for mapping \n\
+       \n\
+      RETURNS\n\
+      The best RMSD found\n\
+    \n";
+  python::def(
+      "CalcRMS", RDKit::CalcRMS,
+      (python::arg("prbMol"), python::arg("refMol"), python::arg("prbId") = -1,
+       python::arg("refId") = -1, python::arg("map") = python::object(),
+       python::arg("maxMatches") = 1000000, python::arg("weights") = python::list()),
+      docString.c_str());
+
+  docString =
       "Alignment conformations in a molecule to each other\n\
      \n\
       The first conformation in the molecule is used as the reference\n\
      \n\
      ARGUMENTS\n\
-      - mol       molecule of interest\n\
-      - atomIds   List of atom ids to use a points for alingment - defaults to all atoms\n\
-      - confIds   Ids of conformations to align - defaults to all conformers \n\
-      - weights   Optionally specify weights for each of the atom pairs\n\
-      - reflect   if true reflect the conformation of the probe molecule\n\
-      - maxIters  maximum number of iterations used in mimizing the RMSD\n\
-      - RMSlist   if provided, fills in the RMS values between the reference\n\
-		  conformation and the other aligned conformations\n\
+      - mol          molecule of interest\n\
+      - atomIds      List of atom ids to use a points for alingment - defaults to all atoms\n\
+      - confIds      Ids of conformations to align - defaults to all conformers \n\
+      - weights      Optionally specify weights for each of the atom pairs\n\
+      - reflect      if true reflect the conformation of the probe molecule\n\
+      - maxIters     maximum number of iterations used in mimizing the RMSD\n\
+      - RMSlist      if provided, fills in the RMS values between the reference\n\
+		     conformation and the other aligned conformations\n\
        \n\
     \n";
   python::def(

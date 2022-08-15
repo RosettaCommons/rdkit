@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2003-2017 Greg Landrum and Rational Discovery LLC
+//  Copyright (C) 2003-2021 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -33,6 +33,8 @@
 #include <GraphMol/SmilesParse/SmartsWrite.h>
 #include <GraphMol/Depictor/RDDepictor.h>
 
+#include <boost/algorithm/string.hpp>
+
 using namespace RDKit::SGroupWriting;
 
 namespace RDKit {
@@ -62,10 +64,7 @@ int getQueryBondTopology(const Bond *bond) {
       if ((*child1)->getDescription() != "BondInRing") {
         std::swap(child1, child2);
       }
-      if ((*child2)->getDescription() == "BondOr" ||
-          (*child2)->getDescription() == "BondOrder") {
-        qry = child1->get();
-      }
+      qry = child1->get();
     }
   }
   if (qry->getDescription() == "BondInRing") {
@@ -94,11 +93,9 @@ int getQueryBondSymbol(const Bond *bond) {
         qry->endChildren() - qry->beginChildren() == 2) {
       auto child1 = qry->beginChildren();
       auto child2 = child1 + 1;
-      if ((*child1)->getDescription() == "BondOr" &&
-          (*child2)->getDescription() == "BondInRing") {
+      if ((*child2)->getDescription() == "BondInRing") {
         qry = child1->get();
-      } else if ((*child1)->getDescription() == "BondInRing" &&
-                 (*child2)->getDescription() == "BondOr") {
+      } else if ((*child1)->getDescription() == "BondInRing") {
         qry = child2->get();
       }
     }
@@ -128,6 +125,12 @@ int getQueryBondSymbol(const Bond *bond) {
     } else if (qry->getDescription() == "SingleOrAromaticBond" &&
                !qry->getNegation()) {
       res = 6;
+    } else if (qry->getDescription() == "SingleOrDoubleBond" &&
+               !qry->getNegation()) {
+      res = 5;
+    } else if (qry->getDescription() == "DoubleOrAromaticBond" &&
+               !qry->getNegation()) {
+      res = 7;
     }
   }
   return res;
@@ -221,70 +224,19 @@ bool hasComplexQuery(const Atom *atom) {
   return res;
 }
 
-bool isListQuery(const Atom::QUERYATOM_QUERY *q) {
-  // list queries are series of nested ors of AtomAtomicNum queries
-  PRECONDITION(q, "bad query");
-  bool res = false;
-  std::string descr = q->getDescription();
-  if (descr == "AtomOr") {
-    res = true;
-    for (auto cIt = q->beginChildren(); cIt != q->endChildren() && res; ++cIt) {
-      std::string descr = (*cIt)->getDescription();
-      // we don't allow negation of any children of the query:
-      if ((*cIt)->getNegation()) {
-        res = false;
-      } else if (descr == "AtomOr") {
-        res = isListQuery((*cIt).get());
-      } else if (descr != "AtomAtomicNum") {
-        res = false;
-      }
-    }
-  }
-  return res;
-}
-
-void getListQueryVals(const Atom::QUERYATOM_QUERY *q, INT_VECT &vals) {
-  // list queries are series of nested ors of AtomAtomicNum queries
-  PRECONDITION(q, "bad query");
-  std::string descr = q->getDescription();
-  PRECONDITION(descr == "AtomOr", "bad query");
-  if (descr == "AtomOr") {
-    for (auto cIt = q->beginChildren(); cIt != q->endChildren(); ++cIt) {
-      std::string descr = (*cIt)->getDescription();
-      CHECK_INVARIANT((descr == "AtomOr" || descr == "AtomAtomicNum"),
-                      "bad query");
-      // we don't allow negation of any children of the query:
-      if (descr == "AtomOr") {
-        getListQueryVals((*cIt).get(), vals);
-      } else if (descr == "AtomAtomicNum") {
-        vals.push_back(
-            static_cast<ATOM_EQUALS_QUERY *>((*cIt).get())->getVal());
-      }
-    }
-  }
-}
-
-bool hasListQuery(const Atom *atom) {
-  PRECONDITION(atom, "bad atom");
-  bool res = false;
-  if (atom->hasQuery()) {
-    res = isListQuery(atom->getQuery());
-  }
-  return res;
-}
-
 const std::string GetMolFileQueryInfo(
     const RWMol &mol, const boost::dynamic_bitset<> &queryListAtoms) {
   std::stringstream ss;
   boost::dynamic_bitset<> listQs(mol.getNumAtoms());
   for (const auto atom : mol.atoms()) {
-    if (hasListQuery(atom) && !queryListAtoms[atom->getIdx()]) {
+    if (isAtomListQuery(atom) && !queryListAtoms[atom->getIdx()]) {
       listQs.set(atom->getIdx());
     }
   }
   for (const auto atom : mol.atoms()) {
     bool wrote_query = false;
-    if (!listQs[atom->getIdx()] && hasComplexQuery(atom)) {
+    if (!listQs[atom->getIdx()] && !queryListAtoms[atom->getIdx()] &&
+        hasComplexQuery(atom)) {
       std::string sma =
           SmartsWrite::GetAtomSmarts(static_cast<const QueryAtom *>(atom));
       ss << "V  " << std::setw(3) << atom->getIdx() + 1 << " " << sma
@@ -301,7 +253,7 @@ const std::string GetMolFileQueryInfo(
   for (const auto atom : mol.atoms()) {
     if (listQs[atom->getIdx()]) {
       INT_VECT vals;
-      getListQueryVals(atom->getQuery(), vals);
+      getAtomListQueryVals(atom->getQuery(), vals);
       ss << "M  ALS " << std::setw(3) << atom->getIdx() + 1 << " ";
       ss << std::setw(2) << vals.size();
       if (atom->getQuery()->getNegation()) {
@@ -309,7 +261,7 @@ const std::string GetMolFileQueryInfo(
       } else {
         ss << " F ";
       }
-      BOOST_FOREACH (int val, vals) {
+      for (auto val : vals) {
         ss << std::setw(4) << std::left
            << (PeriodicTable::getTable()->getElementSymbol(val));
       }
@@ -439,29 +391,52 @@ const std::string AtomGetMolFileSymbol(
     res = atom->getSymbol();
   } else {
     if (!atom->hasProp(common_properties::dummyLabel)) {
-      if (atom->hasQuery() && atom->getQuery()->getNegation() &&
-          atom->getQuery()->getDescription() == "AtomAtomicNum" &&
-          static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery())->getVal() == 1) {
+      if (atom->hasQuery() &&
+          (atom->getQuery()->getTypeLabel() == "A" ||
+           (atom->getQuery()->getNegation() &&
+            atom->getQuery()->getDescription() == "AtomAtomicNum" &&
+            static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery())->getVal() ==
+                1))) {
         res = "A";
-      } else if (atom->hasQuery() && atom->getQuery()->getNegation() &&
-                 atom->getQuery()->getDescription() == "AtomOr" &&
-                 atom->getQuery()->endChildren() -
-                         atom->getQuery()->beginChildren() ==
-                     2 &&
-                 (*atom->getQuery()->beginChildren())->getDescription() ==
-                     "AtomAtomicNum" &&
-                 static_cast<ATOM_EQUALS_QUERY *>(
-                     (*atom->getQuery()->beginChildren()).get())
-                         ->getVal() == 6 &&
-                 (*++(atom->getQuery()->beginChildren()))->getDescription() ==
-                     "AtomAtomicNum" &&
-                 static_cast<ATOM_EQUALS_QUERY *>(
-                     (*++(atom->getQuery()->beginChildren())).get())
-                         ->getVal() == 1) {
+      } else if (atom->hasQuery() &&
+                 (atom->getQuery()->getTypeLabel() == "Q" ||
+                  (atom->getQuery()->getNegation() &&
+                   atom->getQuery()->getDescription() == "AtomOr" &&
+                   atom->getQuery()->endChildren() -
+                           atom->getQuery()->beginChildren() ==
+                       2 &&
+                   (*atom->getQuery()->beginChildren())->getDescription() ==
+                       "AtomAtomicNum" &&
+                   static_cast<ATOM_EQUALS_QUERY *>(
+                       (*atom->getQuery()->beginChildren()).get())
+                           ->getVal() == 6 &&
+                   (*++(atom->getQuery()->beginChildren()))->getDescription() ==
+                       "AtomAtomicNum" &&
+                   static_cast<ATOM_EQUALS_QUERY *>(
+                       (*++(atom->getQuery()->beginChildren())).get())
+                           ->getVal() == 1))) {
         res = "Q";
         queryListAtoms.set(atom->getIdx());
+      } else if (atom->hasQuery() && atom->getQuery()->getTypeLabel() == "X") {
+        res = "X";
+        queryListAtoms.set(atom->getIdx());
+      } else if (atom->hasQuery() && atom->getQuery()->getTypeLabel() == "M") {
+        res = "M";
+        queryListAtoms.set(atom->getIdx());
+      } else if (atom->hasQuery() && atom->getQuery()->getTypeLabel() == "AH") {
+        res = "AH";
+        queryListAtoms.set(atom->getIdx());
+      } else if (atom->hasQuery() && atom->getQuery()->getTypeLabel() == "QH") {
+        res = "QH";
+        queryListAtoms.set(atom->getIdx());
+      } else if (atom->hasQuery() && atom->getQuery()->getTypeLabel() == "XH") {
+        res = "XH";
+        queryListAtoms.set(atom->getIdx());
+      } else if (atom->hasQuery() && atom->getQuery()->getTypeLabel() == "MH") {
+        res = "MH";
+        queryListAtoms.set(atom->getIdx());
       } else if (hasComplexQuery(atom)) {
-        if (hasListQuery(atom)) {
+        if (isAtomListQuery(atom)) {
           res = "L";
         } else {
           res = "*";
@@ -530,7 +505,7 @@ unsigned int getAtomParityFlag(const Atom *atom, const Conformer *conf) {
     if (at->getAtomicNum() == 1) {
       idx += mol.getNumAtoms();
     }
-    vs.push_back(std::make_pair(idx, v));
+    vs.emplace_back(idx, v);
     ++nbrIdx;
   }
   std::sort(vs.begin(), vs.end(),
@@ -764,6 +739,36 @@ int BondGetDirCode(const Bond::BondDir dir) {
   return res;
 }
 
+namespace {
+bool checkNeighbors(const Bond *bond, const Atom *atom) {
+  PRECONDITION(bond, "no bond");
+  PRECONDITION(atom, "no atom");
+  std::vector<int> nbrRanks;
+  for (auto bondIt :
+       boost::make_iterator_range(bond->getOwningMol().getAtomBonds(atom))) {
+    const auto nbrBond = bond->getOwningMol()[bondIt];
+    if (nbrBond->getBondType() == Bond::SINGLE) {
+      if (nbrBond->getBondDir() == Bond::ENDUPRIGHT ||
+          nbrBond->getBondDir() == Bond::ENDDOWNRIGHT) {
+        return false;
+      } else {
+        const auto otherAtom = nbrBond->getOtherAtom(atom);
+        unsigned int rank;
+        if (otherAtom->getPropIfPresent(common_properties::_CIPRank, rank)) {
+          if (std::find(nbrRanks.begin(), nbrRanks.end(), rank) !=
+              nbrRanks.end()) {
+            return false;
+          } else {
+            nbrRanks.push_back(rank);
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+}  // namespace
+
 void GetMolFileBondStereoInfo(const Bond *bond, const INT_MAP_INT &wedgeBonds,
                               const Conformer *conf, int &dirCode,
                               bool &reverse) {
@@ -820,32 +825,8 @@ void GetMolFileBondStereoInfo(const Bond *bond, const INT_MAP_INT &wedgeBonds,
             // FIX: this is the fix for github #2649, but we will need to change
             // it once we start handling allenes properly
 
-            bool nbrHasDir = false;
-
-            ROMol::OEDGE_ITER beg, end;
-            boost::tie(beg, end) =
-                bond->getOwningMol().getAtomBonds(bond->getBeginAtom());
-            while (beg != end && !nbrHasDir) {
-              const Bond *nbrBond = bond->getOwningMol()[*beg];
-              if (nbrBond->getBondType() == Bond::SINGLE &&
-                  (nbrBond->getBondDir() == Bond::ENDUPRIGHT ||
-                   nbrBond->getBondDir() == Bond::ENDDOWNRIGHT)) {
-                nbrHasDir = true;
-              }
-              ++beg;
-            }
-            boost::tie(beg, end) =
-                bond->getOwningMol().getAtomBonds(bond->getEndAtom());
-            while (beg != end && !nbrHasDir) {
-              const Bond *nbrBond = bond->getOwningMol()[*beg];
-              if (nbrBond->getBondType() == Bond::SINGLE &&
-                  (nbrBond->getBondDir() == Bond::ENDUPRIGHT ||
-                   nbrBond->getBondDir() == Bond::ENDDOWNRIGHT)) {
-                nbrHasDir = true;
-              }
-              ++beg;
-            }
-            if (!nbrHasDir) {
+            if (checkNeighbors(bond, bond->getBeginAtom()) &&
+                checkNeighbors(bond, bond->getEndAtom())) {
               dirCode = 3;
             }
           }
@@ -901,11 +882,11 @@ const std::string GetV3000MolFileAtomLine(
   ss << "M  V30 " << atom->getIdx() + 1;
 
   std::string symbol = AtomGetMolFileSymbol(atom, false, queryListAtoms);
-  if (!hasListQuery(atom) || queryListAtoms[atom->getIdx()]) {
+  if (!isAtomListQuery(atom) || queryListAtoms[atom->getIdx()]) {
     ss << " " << symbol;
   } else {
     INT_VECT vals;
-    getListQueryVals(atom->getQuery(), vals);
+    getAtomListQueryVals(atom->getQuery(), vals);
     if (atom->getQuery()->getNegation()) {
       ss << " "
          << "\"NOT";
@@ -923,7 +904,8 @@ const std::string GetV3000MolFileAtomLine(
     }
   }
 
-  ss << " " << x << " " << y << " " << z;
+  ss << std::fixed << " " << x << " " << y << " " << z;
+  ss.unsetf(std::ios_base::floatfield); // << std::defaultfloat; For early stdlibs
   ss << " " << atomMapNumber;
 
   // Extra atom properties.
@@ -1047,6 +1029,9 @@ int GetV3000BondCode(const Bond *bond) {
         break;
       case Bond::DATIVE:
         res = 9;
+        break;
+      case Bond::HYDROGEN:
+        res = 10;
         break;
       default:
         res = 0;
@@ -1326,6 +1311,17 @@ std::string outputMolToMolBlock(const RWMol &tmol, int confId,
         res += GetV3000MolFileSGroupLines(++idx, sgroup);
       }
       res += "M  V30 END SGROUP\n";
+    }
+
+    if (tmol.hasProp(common_properties::molFileLinkNodes)) {
+      auto pval =
+          tmol.getProp<std::string>(common_properties::molFileLinkNodes);
+
+      std::vector<std::string> linknodes;
+      boost::split(linknodes, pval, boost::is_any_of("|"));
+      for (const auto &linknode : linknodes) {
+        res += "M  V30 LINKNODE " + linknode + "\n";
+      }
     }
 
     appendEnhancedStereoGroups(res, tmol);

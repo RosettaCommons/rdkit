@@ -77,9 +77,9 @@ ROMol *FragmentRemover::remove(const ROMol &mol) {
 
   // track original fragment index with the fragment itself
   std::vector<std::pair<boost::shared_ptr<ROMol>, unsigned int>> frags;
-  for (const auto frag :
+  for (const auto &frag :
        MolOps::getMolFrags(mol, sanitizeFrags, nullptr, &atomFragMapping)) {
-    frags.push_back(std::make_pair(frag, frags.size()));
+    frags.emplace_back(frag, frags.size());
   }
 
   for (auto &fgci : fgrps) {
@@ -121,8 +121,8 @@ ROMol *FragmentRemover::remove(const ROMol &mol) {
 
   boost::dynamic_bitset<> atomsToRemove(mol.getNumAtoms());
   atomsToRemove.set();
-  // loop over remaining fragments and track atoms that need to be removed
-  for (const auto frag : frags) {
+  // loop over remaining fragments and track atoms we aren't keeping
+  for (const auto &frag : frags) {
     unsigned int fragIdx = frag.second;
     for (auto atomIdx : atomFragMapping[fragIdx]) {
       atomsToRemove.set(atomIdx, false);
@@ -130,11 +130,13 @@ ROMol *FragmentRemover::remove(const ROMol &mol) {
   }
   // remove the atoms that need to go
   auto *removed = new RWMol(mol);
-  for (int i = mol.getNumAtoms() - 1; i >= 0; --i) {
+  removed->beginBatchEdit();
+  for (unsigned int i = 0; i < mol.getNumAtoms(); ++i) {
     if (atomsToRemove[i]) {
       removed->removeAtom(i);
     }
   }
+  removed->commitBatchEdit();
   return static_cast<ROMol *>(removed);
 }
 
@@ -157,6 +159,9 @@ LargestFragmentChooser::LargestFragmentChooser(
 ROMol *LargestFragmentChooser::choose(const ROMol &mol) {
   BOOST_LOG(rdInfoLog) << "Running LargestFragmentChooser\n";
 
+  if (!mol.getNumAtoms()) {
+    return new ROMol(mol);
+  }
   std::vector<boost::shared_ptr<ROMol>> frags = MolOps::getMolFrags(mol);
   LargestFragmentChooser::Largest l;
 
@@ -212,8 +217,7 @@ ROMol *LargestFragmentChooser::choose(const ROMol &mol) {
   return new ROMol(*(l.Fragment));
 }
 
-LargestFragmentChooser::Largest::Largest()
-    : Smiles(""), Fragment(nullptr), NumAtoms(0), Weight(0), Organic(false) {}
+LargestFragmentChooser::Largest::Largest() : Smiles(""), Fragment(nullptr) {}
 
 LargestFragmentChooser::Largest::Largest(std::string &smiles,
                                          boost::shared_ptr<ROMol> fragment,

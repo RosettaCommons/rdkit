@@ -205,7 +205,7 @@ while the Cu has a valence of 4:
   4
 
 Ring closures
-------------
+-------------
 
 ``%(N)`` notation is supported for ring closures, where N is a single digit ``%(N)`` up to
 five digits ``%(NNNNN)``. Here is an example:
@@ -231,13 +231,19 @@ The RDKit supports parsing and writing a subset of the extended SMILES functiona
 
 The features which are parsed include:
 
-- atomic coordinates
-- atomic values
-- atomic labels
-- atomic properties
-- coordinate bonds (these are translated into double bonds)
-- radicals
+- atomic coordinates ``()``
+- atomic values ``$_AV:``
+- atomic labels/aliases ``$`` (recognized aliases are ``_AP``, ``star_e``,
+  ``Q_e``, ``QH_p``, ``AH_P``, ``X_p``, ``XH_p``, ``M_p``, ``MH_p``, ``*``)
+- atomic properties ``atomprop``
+- coordinate bonds ``C`` (these are translated into double bonds)
+- radicals ``^``
 - enhanced stereo (these are converted into ``StereoGroups``)
+- linknodes ``LN``
+- multi-center attachments ``m``
+- ring bond count specifications ``rb``
+- non-hydrogen substitution count specifications ``s``
+- unsaturation specification ``u``
 
 The features which are written by :py:func:`rdkit.Chem.rdmolfiles.MolToCXSmiles`
 (note the specialized writer function) include:
@@ -351,33 +357,34 @@ Please ignore those characters.
 
 **Atoms**
 
-=========  =========================================  ===============  ======  =========
-Primitive                  Property                   "Default value"  Range?    Notes
-=========  =========================================  ===============  ======  =========
-a          "aromatic atom"
-A          "aliphatic atom"
-D          "explicit degree"                          1                Y
-h          "number of implicit hs"                    >0               Y
-H          "total number of Hs"                       1
-r          "size of smallest SSSR ring"               >0               Y
-R          "number of SSSR rings"                     >0               Y
-v          "total valence"                            1                Y
-x          "number of ring bonds"                     >0               Y
-X          "total degree"                             1                Y
-z          "number of heteroatom neighbors"           >0               Y       extension
-Z          "number of aliphatic heteroatom neighbors" >0               Y       extension
+=========  ==========================================  ===============  ======  =========
+Primitive                  Property                    "Default value"  Range?    Notes
+=========  ==========================================  ===============  ======  =========
+a          "aromatic atom" 
+A          "aliphatic atom" 
+d          "non-hydrogen degree"                       1                Y       extension
+D          "explicit degree"                           1                Y
+h          "number of implicit hs"                     >0               Y
+H          "total number of Hs"                        1
+r          "size of smallest SSSR ring"                >0               Y
+R          "number of SSSR rings"                      >0               Y
+v          "total valence"                             1                Y
+x          "number of ring bonds"                      >0               Y
+X          "total degree"                              1                Y
+z          "number of heteroatom neighbors"            >0               Y       extension
+Z          "number of aliphatic heteroatom neighbors"  >0               Y       extension
 \*         "any atom"
-\+         "positive charge"                          1                Y
+\+         "positive charge"                           1                Y
 ++         "+2 charge"
-\-         "negative charge"                          1                Y
+\-         "negative charge"                           1                Y
 \--        "-2 charge"
-^0         "S hybridized"                             n/a              N       extension
-^1         "SP hybridized"                            n/a              N       extension
-^2         "SP2 hybridized"                           n/a              N       extension
-^3         "SP3 hybridized"                           n/a              N       extension
-^4         "SP3D hybridized"                          n/a              N       extension
-^5         "SP3D2 hybridized"                         n/a              N       extension
-=========  =========================================  ===============  ======  =========
+^0         "S hybridized"                              n/a              N       extension
+^1         "SP hybridized"                             n/a              N       extension
+^2         "SP2 hybridized"                            n/a              N       extension
+^3         "SP3 hybridized"                            n/a              N       extension
+^4         "SP3D hybridized"                           n/a              N       extension
+^5         "SP3D2 hybridized"                          n/a              N       extension
+=========  ==========================================  ===============  ======  =========
 
 
 
@@ -400,7 +407,30 @@ Primitive        Property               Notes
 =========  ====================  ===================
 
 
+Mol/SDF Support and Extensions
+==============================
 
+The RDKit covers an extensive subset of the features in the V2000 and V3000 CTAB specfication.
+This subset should be better documented.
+
+Here are the non-element atom queries that are supported:
+  - A: any heavy atom
+  - Q: any non-carbon heavy atom
+  - \*: unspecfied (interpreted as any atom)
+  - L: (v2000): atom list
+  - AH: (ChemAxon Extension) any atom
+  - QH: (ChemAxon Extension) any non-carbon atom
+  - X: (ChemAxon Extension) halogen
+  - XH: (ChemAxon Extension) halogen or hydrogen
+  - M: (ChemAxon Extension) metal ("contains alkali metals, alkaline earth metals, transition 
+        metals, actinides, lanthanides, poor(basic) metals, Ge, Sb, and Po")
+  - MH: (ChemAxon Extension) metal or hydrogen
+
+
+Here's a partial list of the features that are supported:
+  - enhanced stereochemistry (V3000 only)
+  - Sgroups: Sgroups are read and written, but interpretation of their contents is still very much
+    a work in progress
 
 Ring Finding and SSSR
 =====================
@@ -417,6 +447,136 @@ Because it is sometimes useful to be able to count how many SSSR rings are prese
 For situations where you just care about knowing whether or not atoms/bonds are in rings, the RDKit provides the function
 :py:func:`rdkit.Chem.rdmolops.FastFindRings`. This does a depth-first traversal of the molecule graph and identifies atoms and bonds that
 are in rings.
+
+Stereochemistry
+===============
+
+Types of stereochemistry supported
+----------------------------------
+
+The RDKit currently supports tetrahedral atomic stereochemistry and cis/trans
+stereochemistry at double bonds. We plan to add support for additional types of
+stereochemistry in the future.
+
+Identification of potential stereoatoms/stereobonds
+---------------------------------------------------
+
+As of the 2020.09 release the RDKit has two different ways of identifying potential stereoatoms/stereobonds:
+
+   1. The legacy approach: ``AssignStereochemistry()``.
+      This approach does a reasonable job of recognizing potential
+      stereocenters, including some para-stereochemistry. It also has the side
+      effect of assigning approximate CIP labels to the atoms/bonds (see below).
+      This is currently the default algorithm.
+   2. The new approach: ``FindPotentialStereo()``.
+      The new approach is both more accurate (particularly for
+      para-stereochemistry) and faster. It will become the default in a future
+      RDKit version.
+
+A concrete example of the accuracy improvements arising from the new algorithm:
+
+.. |parastereo1| image:: images/parastereo_1.png
+   :align: middle
+.. |parastereo2| image:: images/parastereo_2.png
+   :align: middle
+
++---------------+---------------+
+| |parastereo2| + |parastereo1| |
++---------------+---------------+
+
+Both algorithms recognize that the central carbon is a potential stereocenter in
+the molecule on the left, but the old algorithm is unable to recognize it as a
+potential stereocenter in the molecule on the right.
+
+
+Assignment of absolute stereochemistry
+--------------------------------------
+
+As of the 2020.09 release the RDKit has two different ways of assigning absolute
+stereochemistry labels (CIP labels):
+
+   1. The legacy approach uses an adaptation of an approximate algorithm for
+      assigning CIP codes published by Paul Labute, [#labutecip]_. The algorithm
+      is reliable for determining whether or not a particular specified
+      stereoatom/stereobond actually is a stereoatom/stereobond, but the CIP
+      codes which it assigns are only truly correct for simple examples. As of
+      the 2020.09 release this is the default algorithm, but this will be
+      changed in a future RDKit release. 
+   2. The new approach uses an implementation of a much more accurate algorithm, 
+      [#newcip]_. The new algorithm is more computationally expensive than the
+      old one and does not provide CIP rankings of atoms (the concept of a
+      global ranking of atoms isn't well defined within the context of the true
+      CIP algorithm). If you're interested in having a chirality-sensitive
+      ranking of all atoms, you can use the canonical atom ranking code instead.
+
+
+Stereogenic atoms/bonds
+-----------------------
+
+The definitions of potential stereogenic atoms or bonds is inspired by the InChI definitions.
+
+Stereogenic bonds
+^^^^^^^^^^^^^^^^^
+
+A double bond is potentially stereogenic if both atoms have at least two heavy
+atom neighbors and it's not present in a ring with less than eight atoms.
+
+.. |psdb1| image:: images/potential_stereo_double_bond1.png
+   :align: middle
+.. |psdb2| image:: images/potential_stereo_double_bond2.png
+   :align: middle
+
+For example, both of these double bonds are candidates for stereochemistry:
+
++---------+---------+
+| |psdb1| + |psdb2| |
++---------+---------+
+
+But this one is not:
+
+.. image:: images/potential_stereo_double_bond3.png
+
+
+Tetrahedral Stereogenic atoms
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The following atom types are potential tetrahedral stereogenic atoms:
+
+  - atoms with degree 4
+  - atoms with degree 3 and one implicit H
+  - P or As with degree 3 or 4
+  - N with degree 3 which is in a ring of size 3 or which is shared between at
+    least 3 rings (this last condition is an extension to the InChI rules) 
+  - S or Se with degree 3 and a total valence of 4 or a total valence of 3 and a
+    net charge of +1.
+
+
+Brief description of the ``findPotentialStereo()`` algorithm
+------------------------------------------------------------
+
+   1. Identify all potential stereogenic atoms and bonds in the molecule. If
+      there aren't any we don't need to do anything else.
+   2. Foreach potential stereogenic atom: save the original chiral tag and then
+      set the chiral tag to CW. Assign an atom symbol that makes this atom
+      unique from all others (this will be used below in the canonicalization
+      algorithm)
+   3. Foreach potential stereogenic bond: assign a bond symbol that makes this
+      bond unique from all others (this will be used below in the
+      canonicalization algorithm)
+   4. Determine the canonical atom ranking taking chirality into account, but
+      not breaking ties. This uses the same canonicalization algorithm that's
+      used to generate SMILES. [#nadinecanon]_
+   5. Remove the chiral tag from any potential stereogenic atom which has two
+      identically ranked neighbors and set its symbol to the default for that
+      atom
+   6. Set the symbol of any double bond which has two identically ranked atoms
+      attached to either end [#eitherend]_ to the default for that bond
+   7. If steps 5 and 6 modfied any atoms or bonds, loop back to step 4. 
+   8. Add any potential stereogenic atom which does not have to identically 
+      ranked neighbors to the results 
+   9. Add any potential stereogenic atom which does not have to identically
+      ranked atoms attached to either end [#eitherend]_ to the results
+   10. Return the results
 
 
 
@@ -581,7 +741,7 @@ chirality:
   >>> Chem.MolToSmiles(ps[0][0],True)
   'CC(=O)O[C@H](C)CCN'
 
-Note that this doesn't make sense without including a bit more
+This doesn't make sense without including a bit more
 context around the stereocenter in the reaction definition:
 
 .. doctest::
@@ -627,9 +787,47 @@ In this case, there's just not sufficient information present to allow
 the information to be preserved. You can help by providing mapping
 information:
 
+**Some caveats** We made this code as robust as we can, but this is a
+non-trivial problem and it's certainly possible to get surprising results.
 
-Rules and caveats
------------------
+Things get tricky if atom ordering around a chiral center changes in the reaction SMARTS. 
+Here are some of the situations that are currently handled correctly.
+
+Reordering of the neighbors, but the number and atom mappings of neighbors
+remains constant. In this case there is no inversion of chirality even though
+the chiral tag on the chiral atom changes between the reactants and products:
+
+.. doctest::
+
+  >>> rxn = AllChem.ReactionFromSmarts('[C:1][C@:2]([F:3])[Br:4]>>[C:1][C@@:2]([S:4])[F:3]')
+  >>> mol = Chem.MolFromSmiles('C[C@@H](F)Br')
+  >>> ps=rxn.RunReactants((mol,))
+  >>> Chem.MolToSmiles(ps[0][0],True)
+  'C[C@@H](F)S'
+
+Adding a neighbor to a chiral atom.
+
+.. doctest::
+
+  >>> rxn = AllChem.ReactionFromSmarts('[C:1][C@H:2]([F:3])[Br:4]>>[C:1][C@@:2](O)([F:3])[Br:4]')
+  >>> mol = Chem.MolFromSmiles('C[C@@H](F)Br')
+  >>> ps=rxn.RunReactants((mol,))
+  >>> Chem.MolToSmiles(ps[0][0],True)
+  'C[C@](O)(F)Br'
+
+Removing a neighbor from a chiral atom.
+
+.. doctest::
+
+  >>> rxn = AllChem.ReactionFromSmarts('[C:1][C@:2](O)([F:3])[Br:4]>>[C:1][C@@H:2]([F:3])[Br:4]')
+  >>> mol = Chem.MolFromSmiles('C[C@@](O)(F)Br')
+  >>> ps=rxn.RunReactants((mol,))
+  >>> Chem.MolToSmiles(ps[0][0],True)
+  'C[C@H](F)Br'
+
+
+Rules and warnings
+------------------
 
 1. Include atom map information at the end of an atom query.
    So do [C,N,O:1] or [C;R:1].
@@ -1390,12 +1588,12 @@ Substructure search using molecules with enhanced stereochemistry follows these 
 * chiral < AND, because AND includes both the chiral molecule and another one
 * chiral < OR, because OR includes either the chiral molecule or another one
 * OR < AND, because AND includes both molecules that OR could actually mean.
-* one group of two atoms < two groups of one atom, because the latter is 4 different
-diastereomers, and the former only two of the four.
+* one group of two atoms < two groups of one atom, because the latter is 4 different diastereomers, and the former only two of the four.
 
 Some concrete examples of this:
 
 .. doctest ::
+
   >>> ps = Chem.SubstructMatchParameters()
   >>> ps.useChirality = True
   >>> ps.useEnhancedStereo = True
@@ -1410,6 +1608,127 @@ Some concrete examples of this:
   True
   >>> m_OR.HasSubstructMatch(m_AND,ps)
   False
+
+
+Query Features in Molecule Drawings
+***********************************
+
+Compactly and clearly including information about query features in molecule
+drawings is a challenging problem. This is definitely a work in progress, but
+this section describes what is currently supported.
+
+Query Bonds
+===========
+
+Here is an example image showing how different bond and query-bond types are rendered.
+
+.. image:: images/query_bonds.png
+
+There's clearly some room for improvement here, for example, it's not trivial to
+distinguish "Any" bonds from query bonds where no special handling has been
+implemented ("other" query types):
+
+.. image:: images/query_bonds.2.png
+
+Query Atoms
+===========
+
+At the moment the only real support for atomic query features is rendering of
+atom lists (and "NOT" atom lists); other atomic queries are rendered with a simple `?`:
+
+.. image:: images/query_atoms.png
+
+
+Conformer Generation
+********************
+
+Introduction
+============
+
+The RDKit can generate conformers for molecules using two different
+methods.  The original method used distance geometry. [#blaney]_
+The default algorithm followed is:
+
+1. The molecule's distance bounds matrix is calculated based on the connection table and a set of rules.
+
+2. The bounds matrix is smoothed using a triangle-bounds smoothing algorithm.
+
+3. A random distance matrix that satisfies the bounds matrix is generated.
+
+4. This distance matrix is embedded in 3D dimensions (producing coordinates for each atom).
+
+5. The resulting coordinates are cleaned up somewhat using the "distance geometry force field", based on distance constraints from the bounds matrix.
+
+The RDKit also has an implementation of the ETKDG method of Riniker and Landrum
+[#riniker2]_ which modifies step 5 above to also use torsion angle preferences
+from the Cambridge Structural Database (CSD) to correct the conformers after
+distance geometry has been used to generate them. The ETDKDG approach can be
+extended to include additional torsion terms for small rings and/or macrocycles [#wangETKDG3]_.
+
+When using the ETKDG approaches the quality of the conformers generated is
+generally good enough to allow them to be used "as is" (i.e. without a
+subsequent minimization step with another force field) for many applications.
+
+
+Parameters Controlling Conformer Generation
+===========================================
+
+A large number of parameters which allow control over the conformer generation
+process are available in the ``EmbedParameters`` class. A subset of particularly
+useful parameters are described here:
+
+- ``randomSeed``: (default -1) allows you to set a random seed to allow reproducible results
+
+- ``numThreads``: (default 1) sets the number of compute threads to be used when 
+  generating multiple conformers. If set to 0 this will use the maximum number
+  of threads allowed on your system.
+
+- ``useRandomCoords``: (default False) if set to True then random-coordinate embedding will be
+  done: instead of steps 3. and 4. above, the atoms will be randomly placed in a
+  box and then their positions will be minimized with the "distance geometry force
+  field" in step 5. This approach was described in reference [#spellmeyerDG]_
+
+- ``enforceChirality``: (default True) ensures that the chirality of specified
+  stereocenters in the molecule is preserved in the conformers.
+
+- ``embedFragsSeparately``: (default True) for molecules made up of multiple
+  disconnected fragments, this cause conformers of the fragments to be generated
+  independently of each other.
+
+- ``coordMap``: (default empty) can be used to provide 3D coordinates which will
+  be used to constrain the positions of some of the atoms in the molecule.
+
+- ``boundsMat``: (default empty) can be used to provide the distance bounds matrix
+  for the molecule.
+
+- ``useExpTorsionAnglePrefs``: (default False) use the ET part of ETKDG [#riniker2]_
+
+- ``useBasicKnowledge``: (default False) use the K part of ETKDG [#riniker2]_
+
+- ``ETVersion``: (default 1) specify the version of the standard torsion
+  definitions to use. NOTE for both ETKDGv2 and ETKDGv3 this should be 2 since ETKDGv3 uses the
+  ETKDGv2 definitions for standard torsions (apologies for the confusing numbering)
+
+- ``useSmallRingTorsions``: (default False) use the sr part of srETDKGv3 [#wangETKDG3]_
+
+- ``useMacrocycleTorsions``: (default False) use the macrocycle torsions from ETKDGv3 [#wangETKDG3]_
+
+- ``useMacrocycle14config``: (default False) use the 1-4 distance bounds from ETKDGv3 [#wangETKDG3]_
+
+- ``forceTransAmides``: (default True) constrain amide bonds to be trans
+
+- ``pruneRMsThresh``: (default -1.0) if >0.0 this turns on RMSD pruning of the conformers
+
+- ``onlyHeavyAtomsForRMS``: (default: False) toggles ignoring H atoms when doing RMSD pruning
+
+- ``useSymmetryForPruning``: (default True) uses symmetry to calculate the minimum
+  RMSD between two conformers when doing RMSD pruning. Note that enabling this
+  causes the RMSD computation to act as if `onlyHeavyAtomsForRMS` is set to true
+  (even if the parameter itself is set to False).
+
+
+Note that there are pre-configured parameter objects for the available ETKDG
+versions: ``ETKDG``, ``ETKDGv2``, ``ETKDGv3``, and ``srETKDGv3``
 
 
 
@@ -1538,13 +1857,22 @@ type definitions.
 .. [#ttFP] http://pubs.acs.org/doi/abs/10.1021/ci00054a008
 .. [#morganFP] http://pubs.acs.org/doi/abs/10.1021/ci100050t
 .. [#gobbiFeats] https://doi.org/10.1002/(SICI)1097-0290(199824)61:1%3C47::AID-BIT9%3E3.0.CO;2-Z
+.. [#labutecip] Labute, P. "An Efficient Algorithm for the Determination of Topological RS Chirality" Journal of the Chemical Computing Group (1996)
+.. [#newcip]  Hanson, R. M., Musacchio, S., Mayfield, J. W., Vainio, M. J., Yerin, A., Redkin, D. "Algorithmic Analysis of Cahn--Ingold--Prelog Rules of Stereochemistry: Proposals for Revised Rules and a Guide for Machine Implementation." J. Chem. Inf. Model. 2018, 58, 1755-1765.
+.. [#nadinecanon] Schneider, N., Sayle, R. A. & Landrum, G. A. Get Your Atoms in Order-An Open-Source Implementation of a Novel and Robust Molecular Canonicalization Algorithm. J. Chem. Inf. Model. 2015, 55, 2111-2120.
+.. [#eitherend] It's ok to have two identically ranked atoms on the two ends of the bond, but having two identically ranked atoms on the same end indicates that it's not a potential stereobond.
+.. [#blaney] Blaney, J. M.; Dixon, J. S. "Distance Geometry in Molecular Modeling".  *Reviews in Computational Chemistry*; VCH: New York, 1994.
+.. [#riniker2] Riniker, S.; Landrum, G. A. "Better Informed Distance Geometry: Using What We Know To Improve Conformation Generation"  *J. Chem. Inf. Comp. Sci.* **55**:2562-74 (2015) https://doi.org/10.1021/acs.jcim.5b00654
+.. [#wangETKDG3] Wang, S.; Witek, J.; Landrum, G. A.; Riniker, S. "Improving Conformer Generation for Small Rings and Macrocycles Based on Distance Geometry and Experimental Torsional-Angle Preferences." *J. Chem. Inf. Model.* **60**, 2044–58 (2020). https://doi.org/10.1021/acs.jcim.0c00025
+.. [#spellmeyerDG] Spellmeyer, D. C.; Wong, A. K.; Bower, M. J.; Blaney, J. M. "Conformational analysis using distance geometry methods." *J. Mol. Graph. Modell.* **15**, 18–36 (1997). https://doi.org/10.1016/s1093-3263(97)00014-4
+
 
 License
 *******
 
 .. image:: images/picture_5.png
 
-This document is copyright (C) 2007-2019 by Greg Landrum
+This document is copyright (C) 2007-2021 by Greg Landrum
 
 This work is licensed under the Creative Commons Attribution-ShareAlike 4.0 License.
 To view a copy of this license, visit http://creativecommons.org/licenses/by-sa/4.0/ or send a letter to Creative Commons, 543 Howard Street, 5th Floor, San Francisco, California, 94105, USA.

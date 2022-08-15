@@ -46,7 +46,7 @@ python::object UFFConfsHelper(ROMol &mol, int numThreads, int maxIters,
   for (auto &itm : res) {
     pyres.append(python::make_tuple(itm.first, itm.second));
   }
-  return pyres;
+  return std::move(pyres);
 }
 
 python::object MMFFConfsHelper(ROMol &mol, int numThreads, int maxIters,
@@ -63,27 +63,27 @@ python::object MMFFConfsHelper(ROMol &mol, int numThreads, int maxIters,
   for (auto &itm : res) {
     pyres.append(python::make_tuple(itm.first, itm.second));
   }
-  return pyres;
+  return std::move(pyres);
 }
 
-int FFHelper(ForceFields::ForceField &ff, int maxIters) {
+int FFHelper(ForceFields::PyForceField &ff, int maxIters) {
   NOGIL gil;
-  return ForceFieldsHelper::OptimizeMolecule(ff, maxIters).first;
+  return ForceFieldsHelper::OptimizeMolecule(*ff.field, maxIters).first;
 }
 
-python::object FFConfsHelper(ROMol &mol, ForceFields::ForceField &ff,
+python::object FFConfsHelper(ROMol &mol, ForceFields::PyForceField &ff,
                              int numThreads, int maxIters) {
   std::vector<std::pair<int, double>> res;
   {
     NOGIL gil;
-    ForceFieldsHelper::OptimizeMoleculeConfs(mol, ff, res, numThreads,
+    ForceFieldsHelper::OptimizeMoleculeConfs(mol, *ff.field, res, numThreads,
                                              maxIters);
   }
   python::list pyres;
   for (auto &itm : res) {
     pyres.append(python::make_tuple(itm.first, itm.second));
   }
-  return pyres;
+  return std::move(pyres);
 }
 
 ForceFields::PyForceField *UFFGetMoleculeForceField(

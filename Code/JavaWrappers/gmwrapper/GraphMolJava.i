@@ -69,6 +69,7 @@
 %include <boost/smart_ptr/shared_array.hpp>
 
 /* undefine RDKIT_<LIBNAME>_EXPORT macros */
+%include <RDGeneral/RDExportMacros.h>
 %include <RDGeneral/export.h>
 /* Include the base types before anything that will utilize them */
 #ifdef SWIGWIN
@@ -82,7 +83,6 @@
 %include "std_map.i"
 %include "std_pair.i"
 %include "carrays.i"
-
 
 /*
  * Custom handler for longs.  The problem is described in swig-Bugs-2965875
@@ -129,6 +129,8 @@ typedef unsigned long long int	uintmax_t;
 %shared_ptr(RDKit::QueryAtom)
 %shared_ptr(RDKit::QueryBond)
 %shared_ptr(RDKit::QueryOps)
+%shared_ptr(RDKit::MolBundle)
+%shared_ptr(RDKit::FixedMolSizeMolBundle)
 %shared_ptr(RDKit::MolSanitizeException)
 %shared_ptr(RDKit::AtomSanitizeException)
 %shared_ptr(RDKit::AtomValenceException)
@@ -201,6 +203,7 @@ typedef unsigned long long int	uintmax_t;
 %include "../QueryAtom.i"
 %include "../QueryBond.i"
 %include "../QueryOps.i"
+%include "../MolBundle.i"
 %include "../MonomerInfo.i"
 %include "../PeriodicTable.i"
 %include "../SanitException.i"
@@ -232,7 +235,11 @@ typedef unsigned long long int	uintmax_t;
 %include "../SubstructLibrary.i"
 %include "../RGroupDecomposition.i"
 %include "../ScaffoldNetwork.i"
+%include "../TautomerQuery.i"
+%include "../SubstanceGroup.i"
+%include "../MolEnumerator.i"
 %include "../MolHash.i"
+%include "../Abbreviations.i"
 %include "../Streams.i"
 
 // Create a class to throw various sorts of errors for testing.  Required for unit tests in ErrorHandlingTests.java

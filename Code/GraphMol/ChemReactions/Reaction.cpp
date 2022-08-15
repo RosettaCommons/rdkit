@@ -35,7 +35,6 @@
 #include <GraphMol/Substruct/SubstructMatch.h>
 #include <GraphMol/QueryOps.h>
 #include <boost/dynamic_bitset.hpp>
-#include <boost/foreach.hpp>
 #include <map>
 #include <algorithm>
 #include <GraphMol/ChemTransforms/ChemTransforms.h>
@@ -60,9 +59,9 @@ ChemicalReaction::ChemicalReaction(const std::string &pickle) {
   ReactionPickler::reactionFromPickle(pickle, this);
 }
 
-void ChemicalReaction::initReactantMatchers() {
+void ChemicalReaction::initReactantMatchers(bool silent) {
   unsigned int nWarnings, nErrors;
-  if (!this->validate(nWarnings, nErrors)) {
+  if (!this->validate(nWarnings, nErrors, silent)) {
     BOOST_LOG(rdErrorLog) << "initialization failed\n";
     this->df_needsInit = true;
   } else {

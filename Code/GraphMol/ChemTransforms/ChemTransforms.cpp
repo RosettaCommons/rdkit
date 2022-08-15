@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2006-2018 Greg Landrum
+//  Copyright (C) 2006-2020 Greg Landrum
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -114,17 +114,13 @@ ROMol *deleteSubstructs(const ROMol &mol, const ROMol &query, bool onlyFrags,
   }
 
   // now loop over the union list and delete the atoms
-  // Will do this in the decreasing order of the atomIds
-  // this is so that the AtomIds ids in the "delList" are
-  // not invalidated by a previous removal (removing atom number i changes
-  // the atom indices only atoms with indices >i )
-  std::sort(delList.begin(), delList.end());
-
+  res->beginBatchEdit();
   boost::dynamic_bitset<> removedAtoms(mol.getNumAtoms());
-  for (auto dri = delList.rbegin(); dri != delList.rend(); dri++) {
-    removedAtoms.set(*dri);
-    res->removeAtom(*dri);
+  for (auto idx : delList) {
+    removedAtoms.set(idx);
+    res->removeAtom(idx);
   }
+  res->commitBatchEdit();
   // if we removed any atoms, clear the computed properties:
   if (delList.size()) {
     updateSubMolConfs(mol, *res, removedAtoms);
@@ -209,22 +205,25 @@ std::vector<ROMOL_SPTR> replaceSubstructs(
       delList = tmp;
     } else {
       // just delete the atoms now:
-      for (auto dri = sortMatch.rbegin(); dri != sortMatch.rend(); dri++) {
-        removedAtoms.set(*dri);
-        newMol->removeAtom(*dri);
+      newMol->beginBatchEdit();
+      for (auto idx : sortMatch) {
+        removedAtoms.set(idx);
+        newMol->removeAtom(idx);
       }
+      newMol->commitBatchEdit();
     }
   }
 
   if (delList.size()) {
     if (replaceAll) {
       // remove the atoms from the delList:
-      std::sort(delList.begin(), delList.end());
       auto *newMol = static_cast<RWMol *>(res[0].get());
-      for (auto dri = delList.rbegin(); dri != delList.rend(); dri++) {
-        removedAtoms.set(*dri);
-        newMol->removeAtom(*dri);
+      newMol->beginBatchEdit();
+      for (auto idx : delList) {
+        removedAtoms.set(idx);
+        newMol->removeAtom(idx);
       }
+      newMol->commitBatchEdit();
     }
 
     // clear conformers and computed props and do basic updates
@@ -255,16 +254,16 @@ ROMol *replaceSidechains(const ROMol &mol, const ROMol &coreQuery,
 
   boost::dynamic_bitset<> matchingIndices(mol.getNumAtoms());
   for (MatchVectType::const_iterator mvit = matchV.begin();
-       mvit != matchV.end(); mvit++) {
+       mvit != matchV.end(); ++mvit) {
     matchingIndices[mvit->second] = 1;
   }
-  std::vector<Atom *> keepList;
 
   auto *newMol = new RWMol(mol);
-  unsigned int nDummies = 0;
+  boost::dynamic_bitset<> keepSet(newMol->getNumAtoms());
+  std::vector<unsigned int> dummyIndices;
   for (MatchVectType::const_iterator mvit = matchV.begin();
-       mvit != matchV.end(); mvit++) {
-    keepList.push_back(newMol->getAtomWithIdx(mvit->second));
+       mvit != matchV.end(); ++mvit) {
+    keepSet.set(mvit->second);
     // if the atom in the molecule has higher degree than the atom in the
     // core, we have an attachment point:
     if (newMol->getAtomWithIdx(mvit->second)->getDegree() >
@@ -276,30 +275,44 @@ ROMol *replaceSidechains(const ROMol &mol, const ROMol &coreQuery,
         if (!matchingIndices[*nbrIdx]) {
           // this neighbor isn't in the match, convert it to a dummy atom and
           // save it
+          keepSet.set(*nbrIdx);
+          dummyIndices.push_back(*nbrIdx);
           Atom *at = newMol->getAtomWithIdx(*nbrIdx);
+          Bond *b = newMol->getBondBetweenAtoms(mvit->second, *nbrIdx);
+          if (b) {
+            b->setIsAromatic(false);
+            b->setBondType(Bond::SINGLE);
+          }
           at->setAtomicNum(0);
-          ++nDummies;
-          at->setIsotope(nDummies);
-          keepList.push_back(at);
+          at->setNumExplicitHs(0);
+          at->setIsAromatic(false);
+          at->setIsotope(dummyIndices.size());
         }
-        nbrIdx++;
+        ++nbrIdx;
       }
     }
   }
-  std::vector<Atom *> delList;
   boost::dynamic_bitset<> removedAtoms(mol.getNumAtoms());
-  for (RWMol::AtomIterator atIt = newMol->beginAtoms();
-       atIt != newMol->endAtoms(); atIt++) {
-    Atom *tmp = *atIt;
-    if (std::find(keepList.begin(), keepList.end(), tmp) == keepList.end()) {
-      delList.push_back(tmp);
-      removedAtoms.set(tmp->getIdx());
+  newMol->beginBatchEdit();
+  for (const auto at : newMol->atoms()) {
+    if (!keepSet.test(at->getIdx())) {
+      newMol->removeAtom(at);
+      removedAtoms.set(at->getIdx());
     }
   }
-  for (std::vector<Atom *>::const_iterator delIt = delList.begin();
-       delIt != delList.end(); delIt++) {
-    newMol->removeAtom(*delIt);
+  // Remove bonds between newly added dummies (if any)
+  if (dummyIndices.size() > 1) {
+    for (size_t i = 0; i < dummyIndices.size() - 1; ++i) {
+      for (size_t j = i + 1; j < dummyIndices.size(); ++j) {
+        const auto b =
+            newMol->getBondBetweenAtoms(dummyIndices.at(i), dummyIndices.at(j));
+        if (b) {
+          newMol->removeBond(dummyIndices.at(i), dummyIndices.at(j));
+        }
+      }
+    }
   }
+  newMol->commitBatchEdit();
 
   updateSubMolConfs(mol, *newMol, removedAtoms);
 
@@ -361,7 +374,7 @@ ROMol *replaceCore(const ROMol &mol, const ROMol &core,
   std::vector<std::pair<int, int>> matchorder_atomidx;
   for (unsigned int i = 0; i < origNumAtoms; ++i) {
     int queryatom = allIndices[i];
-    matchorder_atomidx.push_back(std::make_pair(queryatom, i));
+    matchorder_atomidx.emplace_back(queryatom, i);
   }
 
   std::sort(matchorder_atomidx.begin(), matchorder_atomidx.end());
@@ -412,9 +425,9 @@ ROMol *replaceCore(const ROMol &mol, const ROMol &core,
           //  order
           //  right now so save and sort later.
           if (mapping != -1) {
-            dummies.push_back(std::make_pair(mapping, newAt));
+            dummies.emplace_back(mapping, newAt);
           } else {
-            dummies.push_back(std::make_pair(matchingIndices[nbrIdx], newAt));
+            dummies.emplace_back(matchingIndices[nbrIdx], newAt);
           }
 
           newMol->addAtom(newAt, false, true);
@@ -473,6 +486,17 @@ ROMol *replaceCore(const ROMol &mol, const ROMol &core,
       // add the bonds now, after we've finished the loop over neighbors:
       for (auto &newBond : newBonds) {
         newMol->addBond(newBond, true);
+        auto beginAtom = newBond->getBeginAtom();
+        auto endAtom = newBond->getEndAtom();
+        if (newMol->getNumConformers()) {
+          if (endAtom->getAtomicNum() == 0) {
+            MolOps::setTerminalAtomCoords(*newMol, endAtom->getIdx(),
+                                          beginAtom->getIdx());
+          } else {
+            MolOps::setTerminalAtomCoords(*newMol, beginAtom->getIdx(),
+                                          endAtom->getIdx());
+          }
+        }
       }
     }
   }
@@ -492,18 +516,14 @@ ROMol *replaceCore(const ROMol &mol, const ROMol &core,
 
   std::vector<Atom *> delList;
   boost::dynamic_bitset<> removedAtoms(mol.getNumAtoms());
-  for (RWMol::AtomIterator atIt = newMol->beginAtoms();
-       atIt != newMol->endAtoms(); atIt++) {
-    Atom *tmp = *atIt;
-    if (std::find(keepList.begin(), keepList.end(), tmp) == keepList.end()) {
-      delList.push_back(tmp);
-      removedAtoms.set(tmp->getIdx());
+  newMol->beginBatchEdit();
+  for (const auto at : newMol->atoms()) {
+    if (std::find(keepList.begin(), keepList.end(), at) == keepList.end()) {
+      newMol->removeAtom(at);
+      removedAtoms.set(at->getIdx());
     }
   }
-  for (std::vector<Atom *>::const_iterator delIt = delList.begin();
-       delIt != delList.end(); delIt++) {
-    newMol->removeAtom(*delIt);
-  }
+  newMol->commitBatchEdit();
 
   updateSubMolConfs(mol, *newMol, removedAtoms);
 
@@ -568,7 +588,7 @@ ROMol *MurckoDecompose(const ROMol &mol) {
   }
 
   boost::dynamic_bitset<> removedAtoms(nAtoms);
-  std::vector<Atom *> atomsToRemove;
+  res->beginBatchEdit();
   for (unsigned int i = 0; i < nAtoms; ++i) {
     if (!keepAtoms[i]) {
       Atom *atom = res->getAtomWithIdx(i);
@@ -587,6 +607,10 @@ ROMol *MurckoDecompose(const ROMol &mol) {
           } else if (nbr->getIsAromatic() && nbr->getAtomicNum() != 6) {
             // fix aromatic heteroatoms:
             nbr->setNumExplicitHs(1);
+          } else if (nbr->getIsAromatic() && nbr->getAtomicNum() == 6 &&
+                     nbr->getFormalCharge() == 1) {
+            // fix aromatic carbocations
+            nbr->setNumExplicitHs(1);
           } else if (nbr->getNoImplicit() ||
                      nbr->getChiralTag() != Atom::CHI_UNSPECIFIED) {
             nbr->setNoImplicit(false);
@@ -598,16 +622,13 @@ ROMol *MurckoDecompose(const ROMol &mol) {
       }
 
       if (removeIt) {
-        atomsToRemove.push_back(atom);
+        res->removeAtom(atom);
         removedAtoms.set(atom->getIdx());
       }
     }
   }
+  res->commitBatchEdit();
 
-  for (std::vector<Atom *>::const_iterator atomIt = atomsToRemove.begin();
-       atomIt != atomsToRemove.end(); ++atomIt) {
-    res->removeAtom(*atomIt);
-  }
   updateSubMolConfs(mol, *res, removedAtoms);
   res->clearComputedProps();
 
@@ -679,6 +700,8 @@ void addRecursiveQueries(
       boost::tokenizer<boost::char_separator<char>> tokens(pval, sep);
       boost::tokenizer<boost::char_separator<char>>::iterator token;
       qToAdd = new ATOM_OR_QUERY();
+      qToAdd->setDescription("AtomOr");
+
       for (token = tokens.begin(); token != tokens.end(); ++token) {
         auto iter = queries.find(*token);
         if (iter == queries.end()) {
@@ -687,7 +710,7 @@ void addRecursiveQueries(
           break;
         }
         auto *tqp = new RecursiveStructureQuery(new ROMol(*(iter->second)));
-        boost::shared_ptr<RecursiveStructureQuery> nq(tqp);
+        std::shared_ptr<RecursiveStructureQuery> nq(tqp);
         qToAdd->addChild(nq);
       }
     } else {

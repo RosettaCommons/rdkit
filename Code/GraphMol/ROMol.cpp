@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2003-2015 Greg Landrum and Rational Discovery LLC
+//  Copyright (C) 2003-2021 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -9,7 +9,6 @@
 //
 
 #include <iostream>
-#include <boost/foreach.hpp>
 
 // our stuff
 #include <RDGeneral/Invariant.h>
@@ -51,6 +50,9 @@ void ROMol::destroy() {
     delete dp_ringInfo;
     dp_ringInfo = nullptr;
   }
+
+  getSubstanceGroups(*this).clear();
+  d_stereo_groups.clear();
 };
 
 ROMol::ROMol(const std::string &pickle) : RDProps() {
@@ -100,6 +102,17 @@ void ROMol::initFromOther(const ROMol &other, bool quickCopy, int confId) {
     d_stereo_groups.emplace_back(otherGroup.getGroupType(), std::move(atoms));
   }
 
+  if (other.dp_delAtoms) {
+    dp_delAtoms.reset(new boost::dynamic_bitset<>(*other.dp_delAtoms));
+  } else {
+    dp_delAtoms.reset(nullptr);
+  }
+  if (other.dp_delBonds) {
+    dp_delBonds.reset(new boost::dynamic_bitset<>(*other.dp_delBonds));
+  } else {
+    dp_delBonds.reset(nullptr);
+  }
+
   if (!quickCopy) {
     // copy conformations
     for (auto ci = other.beginConformers(); ci != other.endConformers(); ++ci) {
@@ -117,13 +130,13 @@ void ROMol::initFromOther(const ROMol &other, bool quickCopy, int confId) {
     d_props = other.d_props;
 
     // Bookmarks should be copied as well:
-    BOOST_FOREACH (ATOM_BOOKMARK_MAP::value_type abmI, other.d_atomBookmarks) {
-      BOOST_FOREACH (const Atom *aptr, abmI.second) {
+    for (auto abmI : other.d_atomBookmarks) {
+      for (const auto *aptr : abmI.second) {
         setAtomBookmark(getAtomWithIdx(aptr->getIdx()), abmI.first);
       }
     }
-    BOOST_FOREACH (BOND_BOOKMARK_MAP::value_type bbmI, other.d_bondBookmarks) {
-      BOOST_FOREACH (const Bond *bptr, bbmI.second) {
+    for (auto bbmI : other.d_bondBookmarks) {
+      for (const auto *bptr : bbmI.second) {
         setBondBookmark(getBondWithIdx(bptr->getIdx()), bbmI.first);
       }
     }
@@ -132,6 +145,7 @@ void ROMol::initFromOther(const ROMol &other, bool quickCopy, int confId) {
     STR_VECT computed;
     d_props.setVal(RDKit::detail::computedPropName, computed);
   }
+
   // std::cerr<<"---------    done init from other: "<<this<<"
   // "<<&other<<std::endl;
 }
@@ -151,6 +165,10 @@ void ROMol::initMol() {
 }
 
 unsigned int ROMol::getAtomDegree(const Atom *at) const {
+  PRECONDITION(at, "no atom");
+  PRECONDITION(at->hasOwningMol(), "atom not associated with a molecule");
+  PRECONDITION(&at->getOwningMol() == this,
+               "atom not associated with this molecule");
   return rdcast<unsigned int>(boost::out_degree(at->getIdx(), d_graph));
 };
 
@@ -201,7 +219,6 @@ Atom *ROMol::getAtomWithBookmark(int mark) {
   PRECONDITION(d_atomBookmarks.count(mark) != 0, "atom bookmark not found");
   PRECONDITION(d_atomBookmarks[mark].begin() != d_atomBookmarks[mark].end(),
                "atom bookmark not found");
-
   return *(d_atomBookmarks[mark].begin());
 };
 
@@ -235,7 +252,7 @@ ROMol::BOND_PTR_LIST &ROMol::getAllBondsWithBookmark(int mark) {
 // returns the unique bond with the given bookmark
 Bond *ROMol::getUniqueBondWithBookmark(int mark) {
   PRECONDITION(d_bondBookmarks.count(mark) == 1,
-               "multiple bons with same bookmark");
+               "multiple bonds with same bookmark");
   return getBondWithBookmark(mark);
 }
 
@@ -347,10 +364,18 @@ const Bond *ROMol::getBondBetweenAtoms(unsigned int idx1,
 }
 
 ROMol::ADJ_ITER_PAIR ROMol::getAtomNeighbors(Atom const *at) const {
+  PRECONDITION(at, "no atom");
+  PRECONDITION(at->hasOwningMol(), "atom not associated with a molecule");
+  PRECONDITION(&at->getOwningMol() == this,
+               "atom not associated with this molecule");
   return boost::adjacent_vertices(at->getIdx(), d_graph);
 };
 
 ROMol::OBOND_ITER_PAIR ROMol::getAtomBonds(Atom const *at) const {
+  PRECONDITION(at, "no atom");
+  PRECONDITION(at->hasOwningMol(), "atom not associated with a molecule");
+  PRECONDITION(&at->getOwningMol() == this,
+               "atom not associated with this molecule");
   return boost::out_edges(at->getIdx(), d_graph);
 }
 
@@ -364,6 +389,9 @@ ROMol::BOND_ITER_PAIR ROMol::getEdges() const { return boost::edges(d_graph); }
 unsigned int ROMol::addAtom(Atom *atom_pin, bool updateLabel,
                             bool takeOwnership) {
   PRECONDITION(atom_pin, "null atom passed in");
+  PRECONDITION(!takeOwnership || !atom_pin->hasOwningMol() ||
+                   &atom_pin->getOwningMol() == this,
+               "cannot take ownership of an atom which already has an owner");
   Atom *atom_p;
   if (!takeOwnership) {
     atom_p = atom_pin->copy();
@@ -387,6 +415,9 @@ unsigned int ROMol::addAtom(Atom *atom_pin, bool updateLabel,
 
 unsigned int ROMol::addBond(Bond *bond_pin, bool takeOwnership) {
   PRECONDITION(bond_pin, "null bond passed in");
+  PRECONDITION(!takeOwnership || !bond_pin->hasOwningMol() ||
+                   &bond_pin->getOwningMol() == this,
+               "cannot take ownership of an bond which already has an owner");
   URANGE_CHECK(bond_pin->getBeginAtomIdx(), getNumAtoms());
   URANGE_CHECK(bond_pin->getEndAtomIdx(), getNumAtoms());
   PRECONDITION(bond_pin->getBeginAtomIdx() != bond_pin->getEndAtomIdx(),
@@ -611,11 +642,12 @@ void ROMol::removeConformer(unsigned int id) {
 }
 
 unsigned int ROMol::addConformer(Conformer *conf, bool assignId) {
+  PRECONDITION(conf, "bad conformer");
   PRECONDITION(conf->getNumAtoms() == this->getNumAtoms(),
                "Number of atom mismatch");
   if (assignId) {
     int maxId = -1;
-    BOOST_FOREACH (CONFORMER_SPTR cptr, d_confs) {
+    for (auto cptr : d_confs) {
       maxId = std::max((int)(cptr->getId()), maxId);
     }
     maxId++;

@@ -3,9 +3,7 @@ rdkit_python_extension(rdRGroupDecomposition
                        rdRGroupComposition.cpp
                        DEST Chem 
                        LINK_LIBRARIES
-     RGroupDecomposition FMCS ChemTransforms SubstructMatch SmilesParse GraphMol
-     RDGeneral RDGeometryLib RDBoost
-    ${RDKit_THREAD_LIBS})
+     RGroupDecomposition )
 
 
 
@@ -15,3 +13,6 @@ rdkit_python_extension(rdRGroupDecomposition
 
 add_pytest(pyRGroupDecomposition
          ${CMAKE_CURRENT_SOURCE_DIR}/test_rgroups.py)
+
+add_jupytertest(jupyterRGroupDecomposition
+         ${CMAKE_CURRENT_SOURCE_DIR}/../test_data rgd_testing.ipynb)

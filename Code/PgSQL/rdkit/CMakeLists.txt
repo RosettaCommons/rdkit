@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.1)
-
 if(APPLE)
   set (EXTENSION_PREFIX "")
   set (EXTENSION_SUFFIX ".so")
@@ -16,7 +14,7 @@ endif(RDK_OPTIMIZE_POPCNT)
 
 set(EXTENSION rdkit)
 if(NOT DEFINED Boost_INCLUDE_DIRS)
-  find_package(Boost 1.56.0 REQUIRED)
+  find_package(Boost ${RDK_BOOST_VERSION} REQUIRED)
 endif(NOT DEFINED Boost_INCLUDE_DIRS)
 include_directories(${Boost_INCLUDE_DIRS})
 message("postgres: ${PostgreSQL_INCLUDE_DIRS}")
@@ -35,7 +33,7 @@ if(RDK_BUILD_INCHI_SUPPORT)
   include_directories(${CMAKE_SOURCE_DIR}/External)
   add_definitions(-DRDK_BUILD_INCHI_SUPPORT)
 endif(RDK_BUILD_INCHI_SUPPORT)
-add_definitions(-DRDKITVER="007400")
+add_definitions(-DRDKITVER="007500")
 if(NOT DEFINED PostgreSQL_ROOT)
   if(DEFINED ENV{PostgreSQL_ROOT})
     set(PostgreSQL_ROOT "$ENV{PostgreSQL_ROOT}")
@@ -185,8 +183,8 @@ endif(WIN32 AND NOT UNIX)
 set(testPgSQLBody "cd \"${PG_CURRENT_BINARY_DIR}\"\n"
     "\"${PGREGRESS_BINARY}\" --inputdir=sql "
     "${PGREGRESS_BINDIR_SWITCH} rdkit-91 "
-    "props btree molgist bfpgist-91 sfpgist slfpgist fps reaction "
-    "${avalonRegress} ${inchiRegress}\n")
+    "props btree molgist bfpgist-91 sfpgist slfpgist fps reaction fmcs"
+    " ${avalonRegress} ${inchiRegress}\n")
 file(STRINGS ${PG_CURRENT_SOURCE_DIR}${EXTENSION}.control
     PG_EXTVERSION LIMIT_COUNT 1 REGEX default_version)
 string(REPLACE " " ";" tokList ${PG_EXTVERSION})

@@ -37,6 +37,7 @@ class SparseIntVect {
   //! Copy constructor
   SparseIntVect(const SparseIntVect<IndexType> &other) {
     d_length = other.d_length;
+    d_data.clear();
     d_data.insert(other.d_data.begin(), other.d_data.end());
   }
 
@@ -48,6 +49,16 @@ class SparseIntVect {
   SparseIntVect(const char *pkl, const unsigned int len) {
     initFromText(pkl, len);
   };
+
+  SparseIntVect &operator=(const SparseIntVect<IndexType> &other) {
+    if (this == &other) {
+      return *this;
+    }
+    d_length = other.d_length;
+    d_data.clear();
+    d_data.insert(other.d_data.begin(), other.d_data.end());
+    return *this;
+  }
 
   //! destructor (doesn't need to do anything)
   ~SparseIntVect() {}

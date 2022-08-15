@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2003-2017 Greg Landrum and Rational Discovery LLC
+// Copyright (C) 2003-2021 Greg Landrum and other RDKit contributors
 //
 //   @@ All Rights Reserved @@
 //  This file is part of the RDKit.
@@ -10,10 +10,76 @@
 #include "QueryOps.h"
 #include <algorithm>
 #include <RDGeneral/types.h>
+#include <GraphMol/QueryAtom.h>
+#include <boost/range/iterator_range.hpp>
+#include <boost/dynamic_bitset.hpp>
 
 namespace RDKit {
 
 // common general queries
+
+int queryIsAtomBridgehead(Atom const *at) {
+  // at least three ring bonds, at least one ring bond in a ring which shares at
+  // least two bonds with another ring involving this atom
+  //
+  // We can't just go with "at least three ring bonds shared between multiple
+  // rings" because of structures like CC12CCN(CC1)C2 where there are only two
+  // SSSRs
+  PRECONDITION(at, "no atom");
+  if (at->getDegree() < 3) {
+    return 0;
+  }
+  const auto &mol = at->getOwningMol();
+  const auto ri = mol.getRingInfo();
+  if (!ri || !ri->isInitialized()) {
+    return 0;
+  }
+  // track which bonds involve this atom
+  boost::dynamic_bitset<> atomRingBonds(mol.getNumBonds());
+  for (const auto &nbri : boost::make_iterator_range(mol.getAtomBonds(at))) {
+    const auto &bnd = mol[nbri];
+    if (ri->numBondRings(bnd->getIdx())) {
+      atomRingBonds.set(bnd->getIdx());
+    }
+  }
+  if (atomRingBonds.count() < 3) {
+    return 0;
+  }
+
+  boost::dynamic_bitset<> bondsInRing(mol.getNumBonds());
+  for (unsigned int i = 0; i < ri->bondRings().size(); ++i) {
+    bondsInRing.reset();
+    bool atomInRingI = false;
+
+    for (const auto bidx : ri->bondRings()[i]) {
+      bondsInRing.set(bidx);
+      if (atomRingBonds[bidx]) {
+        atomInRingI = true;
+      }
+    }
+    if (!atomInRingI) {
+      continue;
+    }
+    for (unsigned int j = i + 1; j < ri->bondRings().size(); ++j) {
+      unsigned int overlap = 0;
+      bool atomInRingJ = false;
+      for (const auto bidx : ri->bondRings()[j]) {
+        if (atomRingBonds[bidx]) {
+          atomInRingJ = true;
+        }
+        if (bondsInRing[bidx]) {
+          ++overlap;
+        }
+        if (overlap >= 2 && atomInRingJ) {
+          // we have two rings containing the atom which share at least two
+          // bonds:
+          return 1;
+        }
+      }
+    }
+  }
+  return 0;
+}
 
 //! returns a Query for matching atoms with a particular number of ring bonds
 ATOM_EQUALS_QUERY *makeAtomRingBondCountQuery(int what) {
@@ -342,11 +408,17 @@ ATOM_EQUALS_QUERY *makeAtomInRingQuery() {
   return res;
 }
 
+ATOM_EQUALS_QUERY *makeAtomIsBridgeheadQuery() {
+  auto *res =
+      makeAtomSimpleQuery<ATOM_EQUALS_QUERY>(true, queryIsAtomBridgehead);
+  res->setDescription("AtomIsBridgehead");
+  return res;
+}
+
 ATOM_OR_QUERY *makeQAtomQuery() {
   auto *res = new ATOM_OR_QUERY;
-  res->setDescription("AtomOr");  // FIX: we really should label this more
-                                  // descriptively so that it can be output more
-                                  // cleanly
+  res->setDescription("AtomOr");
+  res->setTypeLabel("Q");
   res->setNegation(true);
   res->addChild(
       Queries::Query<int, Atom const *, true>::CHILD_TYPE(makeAtomNumQuery(6)));
@@ -357,15 +429,18 @@ ATOM_OR_QUERY *makeQAtomQuery() {
 ATOM_EQUALS_QUERY *makeQHAtomQuery() {
   ATOM_EQUALS_QUERY *res = makeAtomNumQuery(6);
   res->setNegation(true);
+  res->setTypeLabel("QH");
   return res;
 }
 ATOM_EQUALS_QUERY *makeAAtomQuery() {
   ATOM_EQUALS_QUERY *res = makeAtomNumQuery(1);
   res->setNegation(true);
+  res->setTypeLabel("A");
   return res;
 }
-ATOM_EQUALS_QUERY *makeAHAtomQuery() {
-  auto *res = rdcast<ATOM_EQUALS_QUERY *>(makeAtomNullQuery());
+ATOM_NULL_QUERY *makeAHAtomQuery() {
+  auto *res = makeAtomNullQuery();
+  res->setTypeLabel("AH");
   return res;
 }
 
@@ -382,12 +457,15 @@ ATOM_OR_QUERY *makeXAtomQuery() {
       makeAtomNumQuery(53)));
   res->addChild(Queries::Query<int, Atom const *, true>::CHILD_TYPE(
       makeAtomNumQuery(85)));
+  res->setTypeLabel("X");
+
   return res;
 }
 ATOM_OR_QUERY *makeXHAtomQuery() {
   ATOM_OR_QUERY *res = makeXAtomQuery();
   res->addChild(
       Queries::Query<int, Atom const *, true>::CHILD_TYPE(makeAtomNumQuery(1)));
+  res->setTypeLabel("XH");
   return res;
 }
 
@@ -399,6 +477,8 @@ ATOM_OR_QUERY *makeMAtomQuery() {
   ATOM_OR_QUERY *res = makeMHAtomQuery();
   res->addChild(
       Queries::Query<int, Atom const *, true>::CHILD_TYPE(makeAtomNumQuery(1)));
+  res->setTypeLabel("M");
+
   return res;
 }
 ATOM_OR_QUERY *makeMHAtomQuery() {
@@ -451,6 +531,7 @@ ATOM_OR_QUERY *makeMHAtomQuery() {
       makeAtomNumQuery(85)));
   res->addChild(Queries::Query<int, Atom const *, true>::CHILD_TYPE(
       makeAtomNumQuery(86)));
+  res->setTypeLabel("MH");
   return res;
 }
 
@@ -495,6 +576,13 @@ ATOM_EQUALS_QUERY *makeAtomHasAliphaticHeteroatomNbrsQuery() {
   return res;
 }
 
+ATOM_EQUALS_QUERY *makeAtomNonHydrogenDegreeQuery(int what) {
+  auto *res =
+      makeAtomSimpleQuery<ATOM_EQUALS_QUERY>(what, queryAtomNonHydrogenDegree);
+  res->setDescription("AtomNonHydrogenDegree");
+  return res;
+}
+
 BOND_EQUALS_QUERY *makeBondOrderEqualsQuery(Bond::BondType what) {
   auto *res = new BOND_EQUALS_QUERY;
   res->setVal(what);
@@ -510,6 +598,84 @@ RDKIT_GRAPHMOL_EXPORT BOND_EQUALS_QUERY *makeSingleOrAromaticBondQuery() {
   res->setDescription("SingleOrAromaticBond");
   return res;
 };
+
+RDKIT_GRAPHMOL_EXPORT BOND_EQUALS_QUERY *makeDoubleOrAromaticBondQuery() {
+  auto *res = new BOND_EQUALS_QUERY;
+  res->setVal(true);
+  res->setDataFunc(queryBondIsDoubleOrAromatic);
+  res->setDescription("DoubleOrAromaticBond");
+  return res;
+};
+
+RDKIT_GRAPHMOL_EXPORT BOND_EQUALS_QUERY *makeSingleOrDoubleBondQuery() {
+  auto *res = new BOND_EQUALS_QUERY;
+  res->setVal(true);
+  res->setDataFunc(queryBondIsSingleOrDouble);
+  res->setDescription("SingleOrDoubleBond");
+  return res;
+};
+
+RDKIT_GRAPHMOL_EXPORT BOND_EQUALS_QUERY *
+makeSingleOrDoubleOrAromaticBondQuery() {
+  auto *res = new BOND_EQUALS_QUERY;
+  res->setVal(true);
+  res->setDataFunc(queryBondIsSingleOrDoubleOrAromatic);
+  res->setDescription("SingleOrDoubleOrAromaticBond");
+  return res;
+};
+
+namespace QueryOps {
+const std::vector<std::string> bondOrderQueryFunctions{
+    std::string("BondOrder"), std::string("SingleOrAromaticBond"),
+    std::string("DoubleOrAromaticBond"), std::string("SingleOrDoubleBond"),
+    std::string("SingleOrDoubleOrAromaticBond")};
+RDKIT_GRAPHMOL_EXPORT bool hasBondTypeQuery(
+    const Queries::Query<int, Bond const *, true> &qry) {
+  const auto df = qry.getDescription();
+  // is this a bond order query?
+  if (std::find(bondOrderQueryFunctions.begin(), bondOrderQueryFunctions.end(),
+                df) != bondOrderQueryFunctions.end()) {
+    return true;
+  }
+  for (const auto &child :
+       boost::make_iterator_range(qry.beginChildren(), qry.endChildren())) {
+    if (hasBondTypeQuery(*child)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+namespace {
+bool hasComplexBondTypeQueryHelper(
+    const Queries::Query<int, Bond const *, true> &qry, bool seenBondOrder) {
+  const auto df = qry.getDescription();
+  bool isBondOrder = (df == "BondOrder");
+  // is this a bond order query?
+  if (std::find(bondOrderQueryFunctions.begin(), bondOrderQueryFunctions.end(),
+                df) != bondOrderQueryFunctions.end()) {
+    if (seenBondOrder || !isBondOrder || qry.getNegation()) {
+      return true;
+    }
+  }
+  for (const auto &child :
+       boost::make_iterator_range(qry.beginChildren(), qry.endChildren())) {
+    if (hasComplexBondTypeQueryHelper(*child, seenBondOrder | isBondOrder)) {
+      return true;
+    }
+    if (child->getDescription() == "BondOrder") {
+      seenBondOrder = true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
+RDKIT_GRAPHMOL_EXPORT bool hasComplexBondTypeQuery(
+    const Queries::Query<int, Bond const *, true> &qry) {
+  return hasComplexBondTypeQueryHelper(qry, false);
+}
+}  // namespace QueryOps
 
 BOND_EQUALS_QUERY *makeBondDirEqualsQuery(Bond::BondDir what) {
   auto *res = new BOND_EQUALS_QUERY;
@@ -560,6 +726,7 @@ ATOM_NULL_QUERY *makeAtomNullQuery() {
 }
 
 bool isComplexQuery(const Bond *b) {
+  PRECONDITION(b, "bad bond");
   if (!b->hasQuery()) {
     return false;
   }
@@ -575,7 +742,8 @@ bool isComplexQuery(const Bond *b) {
     return true;
   }
   if (descr == "BondOr") {
-    // detect the types of queries that appear for unspecified bonds in SMARTS:
+    // detect the types of queries that appear for unspecified bonds in
+    // SMARTS:
     if (b->getQuery()->endChildren() - b->getQuery()->beginChildren() == 2) {
       for (auto child = b->getQuery()->beginChildren();
            child != b->getQuery()->endChildren(); ++child) {
@@ -597,6 +765,7 @@ bool isComplexQuery(const Bond *b) {
   return true;
 }
 
+namespace {
 bool _complexQueryHelper(Atom::QUERYATOM_QUERY const *query, bool &hasAtNum) {
   if (!query) {
     return false;
@@ -624,7 +793,80 @@ bool _complexQueryHelper(Atom::QUERYATOM_QUERY const *query, bool &hasAtNum) {
   }
   return false;
 }
+
+template <typename T>
+bool _atomListQueryHelper(const T query) {
+  PRECONDITION(query, "no query");
+  if (query->getNegation()) {
+    return false;
+  }
+  if (query->getDescription() == "AtomAtomicNum" ||
+      query->getDescription() == "AtomType") {
+    return true;
+  }
+  if (query->getDescription() == "AtomOr") {
+    for (const auto child : boost::make_iterator_range(query->beginChildren(),
+                                                       query->endChildren())) {
+      if (!_atomListQueryHelper(child)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+}  // namespace
+bool isAtomListQuery(const Atom *a) {
+  PRECONDITION(a, "bad atom");
+  if (!a->hasQuery()) {
+    return false;
+  }
+  if (a->getQuery()->getDescription() == "AtomOr") {
+    for (const auto &child : boost::make_iterator_range(
+             a->getQuery()->beginChildren(), a->getQuery()->endChildren())) {
+      if (!_atomListQueryHelper(child)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+void getAtomListQueryVals(const Atom::QUERYATOM_QUERY *q,
+                          std::vector<int> &vals) {
+  // list queries are series of nested ors of AtomAtomicNum queries
+  PRECONDITION(q, "bad query");
+  auto descr = q->getDescription();
+  PRECONDITION(descr == "AtomOr", "bad query");
+  if (descr == "AtomOr") {
+    for (const auto &child :
+         boost::make_iterator_range(q->beginChildren(), q->endChildren())) {
+      auto descr = child->getDescription();
+      if (child->getNegation() ||
+          (descr != "AtomOr" && descr != "AtomAtomicNum" &&
+           descr != "AtomType")) {
+        throw ValueErrorException("bad query type1");
+      }
+      // we don't allow negation of any children of the query:
+      if (descr == "AtomOr") {
+        getAtomListQueryVals(child.get(), vals);
+      } else if (descr == "AtomAtomicNum") {
+        vals.push_back(static_cast<ATOM_EQUALS_QUERY *>(child.get())->getVal());
+      } else if (descr == "AtomType") {
+        auto v = static_cast<ATOM_EQUALS_QUERY *>(child.get())->getVal();
+        // aromatic AtomType queries subtract 1000 from the atomic number;
+        // correct for that:
+        if (v < 0) {
+          v += 1000;
+        }
+        vals.push_back(v);
+      }
+    }
+  }
+}
+
 bool isComplexQuery(const Atom *a) {
+  PRECONDITION(a, "bad atom");
   if (!a->hasQuery()) {
     return false;
   }
@@ -656,6 +898,7 @@ bool isComplexQuery(const Atom *a) {
   return true;
 }
 bool isAtomAromatic(const Atom *a) {
+  PRECONDITION(a, "bad atom");
   bool res = false;
   if (!a->hasQuery()) {
     res = a->getIsAromatic();
@@ -694,4 +937,49 @@ bool isAtomAromatic(const Atom *a) {
   }
   return res;
 }
+
+namespace QueryOps {
+namespace {
+void completeQueryAndChildren(ATOM_EQUALS_QUERY *query, Atom *tgt,
+                              unsigned int magicVal) {
+  PRECONDITION(query, "no query");
+  PRECONDITION(tgt, "no atom");
+  if (static_cast<unsigned int>(query->getVal()) == magicVal) {
+    int tgtVal = query->getDataFunc()(tgt);
+    query->setVal(tgtVal);
+  }
+  for (auto childIt = query->beginChildren(); childIt != query->endChildren();
+       ++childIt) {
+    completeQueryAndChildren((ATOM_EQUALS_QUERY *)(childIt->get()), tgt,
+                             magicVal);
+  }
+}
+}  // namespace
+void completeMolQueries(RWMol *mol, unsigned int magicVal) {
+  PRECONDITION(mol, "bad molecule");
+  for (auto atom : mol->atoms()) {
+    if (atom->hasQuery()) {
+      auto *query = static_cast<ATOM_EQUALS_QUERY *>(atom->getQuery());
+      completeQueryAndChildren(query, atom, magicVal);
+    }
+  }
+}
+
+Atom *replaceAtomWithQueryAtom(RWMol *mol, Atom *atom) {
+  PRECONDITION(mol, "bad molecule");
+  PRECONDITION(atom, "bad atom");
+  if (atom->hasQuery()) {
+    return atom;
+  }
+
+  QueryAtom qa(*atom);
+  unsigned int idx = atom->getIdx();
+
+  if (atom->hasProp(common_properties::_hasMassQuery)) {
+    qa.expandQuery(makeAtomMassQuery(static_cast<int>(atom->getMass())));
+  }
+  mol->replaceAtom(idx, &qa);
+  return mol->getAtomWithIdx(idx);
+}
+}  // namespace QueryOps
 };  // namespace RDKit

@@ -10,7 +10,6 @@
 // Tests of substructure searching
 //
 
-#define CATCH_CONFIG_MAIN
 #include "catch.hpp"
 
 #include <tuple>
@@ -55,10 +54,11 @@ static _IsSubstructOf IsSubstructOf(const ROMol &m) {
 
 namespace Catch {
 // ""_smiles returns an RWMol.
-template <> struct StringMaker<RDKit::RWMol> {
+template <>
+struct StringMaker<RDKit::RWMol> {
   static std::string convert(RDKit::RWMol const &m) { return MolToCXSmiles(m); }
 };
-}
+}  // namespace Catch
 
 TEST_CASE("substructure parameters", "[substruct]") {
   SECTION("chirality") {
@@ -135,12 +135,17 @@ TEST_CASE("substructure parameters", "[substruct]") {
 
 namespace {
 bool no_match(const ROMol &mol, const std::vector<unsigned int> &ids) {
+  RDUNUSED_PARAM(mol);
+  RDUNUSED_PARAM(ids);
   return false;
 }
 bool always_match(const ROMol &mol, const std::vector<unsigned int> &ids) {
+  RDUNUSED_PARAM(mol);
+  RDUNUSED_PARAM(ids);
   return true;
 }
 bool bigger(const ROMol &mol, const std::vector<unsigned int> &ids) {
+  RDUNUSED_PARAM(mol);
   return std::accumulate(ids.begin(), ids.end(), 0) > 5;
 }
 }  // namespace
@@ -169,7 +174,7 @@ TEST_CASE("providing a final match function", "[substruct]") {
   }
 }
 
-TEST_CASE("Enhanced stereochemistry", "[substruct,StereoGroup]") {
+TEST_CASE("Enhanced stereochemistry", "[substruct][StereoGroup]") {
   // Chirality specifications.
   // 1. An achiral molecule: CC(O)C(CC)F means unknown/all stereoisomers
   // 2. A chiral molecule: C[C@H](O)[C@H](CC)F means 1 stereoisomer
@@ -261,5 +266,47 @@ TEST_CASE("Enhanced stereochemistry", "[substruct,StereoGroup]") {
     CHECK_THAT(*mol_or_partial, IsSubstructOf(*mol_or_long, ps));
     CHECK_THAT(*mol_or_partial, IsSubstructOf(*mol_and_long, ps));
     CHECK_THAT(*mol_and_partial, !IsSubstructOf(*mol_or_long, ps));
+  }
+}
+
+TEST_CASE("Github #4138: empty query produces non-empty results",
+          "[substruct][bug]") {
+  auto mol = "C1CCCCO1"_smiles;
+  auto emol = ""_smiles;
+  auto qry = "C"_smarts;
+  auto eqry = ""_smarts;
+  REQUIRE(mol);
+  REQUIRE(qry);
+  SECTION("empty query") {
+    {
+      auto matches = SubstructMatch(*mol, *eqry);
+      CHECK(matches.empty());
+    }
+    {
+      std::vector<MatchVectType> matches;
+      CHECK(SubstructMatch(*mol, *eqry, matches) == false);
+      CHECK(matches.empty());
+    }
+    {
+      MatchVectType match;
+      CHECK(SubstructMatch(*mol, *eqry, match) == false);
+      CHECK(match.empty());
+    }
+  }
+  SECTION("empty mol") {
+    {
+      auto matches = SubstructMatch(*emol, *qry);
+      CHECK(matches.empty());
+    }
+    {
+      std::vector<MatchVectType> matches;
+      CHECK(SubstructMatch(*emol, *qry, matches) == false);
+      CHECK(matches.empty());
+    }
+    {
+      MatchVectType match;
+      CHECK(SubstructMatch(*emol, *qry, match) == false);
+      CHECK(match.empty());
+    }
   }
 }

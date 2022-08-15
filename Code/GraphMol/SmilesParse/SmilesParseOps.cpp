@@ -151,6 +151,7 @@ void AddFragToMol(RWMol *mol, RWMol *frag, Bond::BondType bondOrder,
         newB->setOwningMol(mol);
         newB->setBeginAtomIdx(atomIdx1);
         newB->setEndAtomIdx(atomIdx2);
+        newB->setProp(RDKit::common_properties::_unspecifiedOrder, 1);
         mol->addBond(newB);
         delete newB;
       } else {
@@ -229,7 +230,7 @@ void AdjustAtomChiralityFlags(RWMol *mol) {
       std::list<SIZET_PAIR> neighbors;
       // push this atom onto the list of neighbors (we'll use this
       // to find our place later):
-      neighbors.push_back(std::make_pair(atom->getIdx(), -1));
+      neighbors.emplace_back(atom->getIdx(), -1);
       std::list<size_t> bondOrder;
       for (auto nbrIdx :
            boost::make_iterator_range(mol->getAtomNeighbors(atom))) {
@@ -237,7 +238,7 @@ void AdjustAtomChiralityFlags(RWMol *mol) {
         if (std::find(ringClosures.begin(), ringClosures.end(),
                       static_cast<int>(nbrBond->getIdx())) ==
             ringClosures.end()) {
-          neighbors.push_back(std::make_pair(nbrIdx, nbrBond->getIdx()));
+          neighbors.emplace_back(nbrIdx, nbrBond->getIdx());
         }
       }
       // sort the list of non-ring-closure bonds:
@@ -441,6 +442,13 @@ void CloseMolRings(RWMol *mol, bool toleratePartials) {
           CHECK_INVARIANT(bond2->getBeginAtomIdx() == atom2->getIdx(),
                           "bad begin atom");
 
+          // we use the _cxsmilesBondIdx value from the second one, if it's
+          // there
+          if (bond2->hasProp("_cxsmilesBondIdx")) {
+            bond1->setProp("_cxsmilesBondIdx",
+                           bond2->getProp<unsigned int>("_cxsmilesBondIdx"));
+          }
+
           Bond *matchedBond;
 
           // figure out which (if either) bond has a specified type, we'll
@@ -549,6 +557,7 @@ void CleanupAfterParsing(RWMol *mol) {
   }
   for (auto bond : mol->bonds()) {
     bond->clearProp(common_properties::_unspecifiedOrder);
+    bond->clearProp("_cxsmilesBondIdx");
   }
 }
 

@@ -112,11 +112,6 @@ void TDTMolSupplier::init() {
   d_last = 0;
   d_line = 0;
 }
-TDTMolSupplier::~TDTMolSupplier() {
-  if (df_owner && dp_inStream) {
-    delete dp_inStream;
-  }
-}
 
 void TDTMolSupplier::setData(const std::string &text,
                              const std::string &nameRecord, int confId2D,
@@ -309,7 +304,7 @@ ROMol *TDTMolSupplier::next() {
       BOOST_LOG(rdErrorLog)
           << "ERROR: Could not sanitize molecule ending on line " << d_line
           << std::endl;
-      BOOST_LOG(rdErrorLog) << "ERROR: " << se.message() << "\n";
+      BOOST_LOG(rdErrorLog) << "ERROR: " << se.what() << "\n";
       while (!dp_inStream->eof() && !dp_inStream->fail() &&
              tempStr.find("|") != 0) {
         d_line++;

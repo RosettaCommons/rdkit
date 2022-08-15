@@ -1,17 +1,19 @@
 steps:
 - bash: |
+    sudo apt-get install g++ wget make libgl1-mesa-dev mesa-common-dev
     source ${CONDA}/etc/profile.d/conda.sh
     sudo chown -R ${USER} ${CONDA}
     conda config --set always_yes yes --set changeps1 no
     conda update -q conda
     conda info -a
-    conda create --name rdkit_build $(compiler) cmake \
-        boost-cpp=$(boost_version) boost=$(boost_version) \
-        py-boost=$(boost_version) libboost=$(boost_version) \
-        numpy matplotlib pillow eigen pandas \
-        sphinx recommonmark jupyter
+    conda create --name rdkit_build $(python) cmake \
+        boost-cpp=$(boost_version) \
+        py-boost=$(boost_version) \
+        numpy pillow eigen pandas \
+        qt
     conda activate rdkit_build
-    conda install -c rdkit nox cairo
+    conda install -c conda-forge nbval
+    conda install -c rdkit nox cairo=1.14.6
   displayName: Setup build environment
 - bash: |
     source ${CONDA}/etc/profile.d/conda.sh
@@ -25,17 +27,21 @@ steps:
     -DRDK_BUILD_PYTHON_WRAPPERS=ON \
     -DRDK_USE_BOOST_REGEX=ON \
     -DRDK_BUILD_COORDGEN_SUPPORT=ON \
+    -DRDK_BUILD_MAEPARSER_SUPPORT=ON \
     -DRDK_OPTIMIZE_POPCNT=ON \
     -DRDK_BUILD_TEST_GZIP=ON \
     -DRDK_BUILD_FREESASA_SUPPORT=ON \
     -DRDK_BUILD_AVALON_SUPPORT=ON \
     -DRDK_BUILD_INCHI_SUPPORT=ON \
     -DRDK_BUILD_CAIRO_SUPPORT=ON \
+    -DRDK_BUILD_QT_SUPPORT=ON \
+    -DQt5_DIR=/usr/lib/x86_64-linux-gnu/cmake/Qt5 \
     -DRDK_BUILD_SWIG_WRAPPERS=OFF \
     -DRDK_SWIG_STATIC=OFF \
     -DRDK_BUILD_THREADSAFE_SSS=ON \
     -DRDK_TEST_MULTITHREADED=ON \
     -DBoost_NO_SYSTEM_PATHS=ON \
+    -DBoost_NO_BOOST_CMAKE=TRUE \
     -DRDK_BOOST_PYTHON3_NAME=$(python_name) \
     -DPYTHON_EXECUTABLE=${CONDA_PREFIX}/bin/python3 \
     -DCMAKE_INCLUDE_PATH="${CONDA_PREFIX}/include" \
@@ -52,7 +58,8 @@ steps:
     conda activate rdkit_build
     export RDBASE=`pwd`
     export PYTHONPATH=${RDBASE}:${PYTHONPATH}
-    export LD_LIBRARY_PATH=${RDBASE}/lib:${LD_LIBRARY_PATH}
+    export LD_LIBRARY_PATH=${RDBASE}/lib:${CONDA_PREFIX}/lib:${LD_LIBRARY_PATH}
+    echo "LD_LIBRARY_PATH: " $LD_LIBRARY_PATH
     export QT_QPA_PLATFORM='offscreen'
     cd build
     ctest -j $( $(number_of_cores) ) --output-on-failure -T Test
@@ -60,6 +67,7 @@ steps:
 - bash: |
     source ${CONDA}/etc/profile.d/conda.sh
     conda activate rdkit_build
+    conda install ipython matplotlib-base sphinx=3.1.2 recommonmark 
     export RDBASE=`pwd`
     export PYTHONPATH=${RDBASE}:${PYTHONPATH}
     export LD_LIBRARY_PATH=${RDBASE}/lib:${LD_LIBRARY_PATH}
