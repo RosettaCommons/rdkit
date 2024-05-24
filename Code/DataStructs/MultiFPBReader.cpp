@@ -29,7 +29,7 @@ std::uint8_t *bitsetToBytes(const boost::dynamic_bitset<> &bitset);
 
 namespace {
 struct tplSorter
-    : public std::function<bool(MultiFPBReader::ResultTuple,
+    : public std::function<bool(MultiFPBReader::ResultTuple, /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
                                   MultiFPBReader::ResultTuple)> {
   bool operator()(const MultiFPBReader::ResultTuple &v1,
                   const MultiFPBReader::ResultTuple &v2) const {
@@ -45,7 +45,7 @@ struct tplSorter
   }
 };
 struct pairSorter
-    : public std::function<bool(std::pair<unsigned int, unsigned int>,
+    : public std::function<bool(std::pair<unsigned int, unsigned int>, /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
                                   std::pair<unsigned int, unsigned int>)> {
   bool operator()(const std::pair<unsigned int, unsigned int> &v1,
                   const std::pair<unsigned int, unsigned int> &v2) const {

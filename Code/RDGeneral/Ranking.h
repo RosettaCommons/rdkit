@@ -28,7 +28,7 @@ namespace Rankers {
 // compared.
 template <typename T1, typename T2>
 struct pairGreater
-    : public std::function<bool( std::pair<T1, T2>, std::pair<T1, T2>) > {
+    : public std::function<bool( std::pair<T1, T2>, std::pair<T1, T2>) > { /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
   bool operator()(const std::pair<T1, T2> &v1,
                   const std::pair<T1, T2> &v2) const {
     return v1.first > v2.first;
@@ -39,7 +39,7 @@ struct pairGreater
 // compared.
 template <typename T1, typename T2>
 struct pairLess
-    : public std::function<bool( std::pair<T1, T2>, std::pair<T1, T2> ) > {
+    : public std::function<bool( std::pair<T1, T2>, std::pair<T1, T2> ) > { /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
   bool operator()(const std::pair<T1, T2> &v1,
                   const std::pair<T1, T2> &v2) const {
     return v1.first < v2.first;
@@ -47,9 +47,9 @@ struct pairLess
 };
 
 template <typename T>
-class argless : public std::function<bool( T, T ) > {
+class argless : public std::function<bool( T, T ) > { /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
  public:
-  argless(const T &c) : std::function<bool( T, T )>(), container(c){};
+  argless(const T &c) : std::function<bool( T, T )>(), container(c){}; /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
   bool operator()(unsigned int v1, unsigned int v2) const {
     return container[v1] < container[v2];
   }

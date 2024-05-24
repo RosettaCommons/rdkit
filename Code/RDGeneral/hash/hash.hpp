@@ -372,6 +372,8 @@ namespace gboost
     //
 
 #if !BOOST_WORKAROUND(BOOST_MSVC, < 1300)
+
+/*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
 #define BOOST_HASH_SPECIALIZE(type) \
     template <> struct hash<type> \
          : public std::function<std::hash_result_t(type)> \
@@ -382,6 +384,7 @@ namespace gboost
         } \
     };
 
+/*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
 #define BOOST_HASH_SPECIALIZE_REF(type) \
     template <> struct hash<type> \
          : public std::function<std::hash_result_t(type)> \
@@ -392,6 +395,8 @@ namespace gboost
         } \
     };
 #else
+
+/*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
 #define BOOST_HASH_SPECIALIZE(type) \
     template <> struct hash<type> \
          : public std::function<std::hash_result_t(type)> \
@@ -411,6 +416,7 @@ namespace gboost
         } \
     };
 
+/*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
 #define BOOST_HASH_SPECIALIZE_REF(type) \
     template <> struct hash<type> \
          : public std::function<std::hash_result_t(type)> \
@@ -455,7 +461,7 @@ namespace gboost
 #if !defined(BOOST_NO_TEMPLATE_PARTIAL_SPECIALIZATION)
     template <class T>
     struct hash<T*>
-        : public std::function<std::hash_result_t(T*)>
+        : public std::function<std::hash_result_t(T*)> /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
     {
         std::hash_result_t operator()(T* v) const
         {
@@ -480,7 +486,7 @@ namespace gboost
         {
             template <class T>
             struct inner
-                : public std::function<std::hash_result_t(T)>
+                : public std::function<std::hash_result_t(T)> /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
             {
                 std::hash_result_t operator()(T val) const
                 {

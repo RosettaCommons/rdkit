@@ -335,7 +335,7 @@ void _setRingAngle(Atom::HybridizationType aHyb, unsigned int ringSize,
   }
 }
 
-struct lessVector : public std::function<bool( INT_VECT, INT_VECT )> {
+struct lessVector : public std::function<bool( INT_VECT, INT_VECT )> { /*Modified for Rosetta CXX17 compatibility.  Resolve merge conflicts in favour of the primary RDKit repository.  VKM, 24 May 2024.*/
   bool operator()(const INT_VECT &v1, const INT_VECT &v2) const {
     return v1.size() < v2.size();
   }
