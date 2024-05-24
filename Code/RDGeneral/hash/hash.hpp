@@ -374,7 +374,7 @@ namespace gboost
 #if !BOOST_WORKAROUND(BOOST_MSVC, < 1300)
 #define BOOST_HASH_SPECIALIZE(type) \
     template <> struct hash<type> \
-         : public std::unary_function<type, std::hash_result_t> \
+         : public std::function<std::hash_result_t(type)> \
     { \
         std::hash_result_t operator()(type v) const \
         { \
@@ -384,7 +384,7 @@ namespace gboost
 
 #define BOOST_HASH_SPECIALIZE_REF(type) \
     template <> struct hash<type> \
-         : public std::unary_function<type, std::hash_result_t> \
+         : public std::function<std::hash_result_t(type)> \
     { \
         std::hash_result_t operator()(type const& v) const \
         { \
@@ -394,7 +394,7 @@ namespace gboost
 #else
 #define BOOST_HASH_SPECIALIZE(type) \
     template <> struct hash<type> \
-         : public std::unary_function<type, std::hash_result_t> \
+         : public std::function<std::hash_result_t(type)> \
     { \
         std::hash_result_t operator()(type v) const \
         { \
@@ -403,7 +403,7 @@ namespace gboost
     }; \
     \
     template <> struct hash<const type> \
-         : public std::unary_function<const type, std::hash_result_t> \
+         : public std::function<std::hash_result_t(const type)> \
     { \
         std::hash_result_t operator()(const type v) const \
         { \
@@ -413,7 +413,7 @@ namespace gboost
 
 #define BOOST_HASH_SPECIALIZE_REF(type) \
     template <> struct hash<type> \
-         : public std::unary_function<type, std::hash_result_t> \
+         : public std::function<std::hash_result_t(type)> \
     { \
         std::hash_result_t operator()(type const& v) const \
         { \
@@ -422,7 +422,7 @@ namespace gboost
     }; \
     \
     template <> struct hash<const type> \
-         : public std::unary_function<const type, std::hash_result_t> \
+         : public std::function<std::hash_result_t(const type)> \
     { \
         std::hash_result_t operator()(type const& v) const \
         { \
@@ -455,7 +455,7 @@ namespace gboost
 #if !defined(BOOST_NO_TEMPLATE_PARTIAL_SPECIALIZATION)
     template <class T>
     struct hash<T*>
-        : public std::unary_function<T*, std::hash_result_t>
+        : public std::function<std::hash_result_t(T*)>
     {
         std::hash_result_t operator()(T* v) const
         {
@@ -480,7 +480,7 @@ namespace gboost
         {
             template <class T>
             struct inner
-                : public std::unary_function<T, std::hash_result_t>
+                : public std::function<std::hash_result_t(T)>
             {
                 std::hash_result_t operator()(T val) const
                 {

@@ -29,8 +29,8 @@ std::uint8_t *bitsetToBytes(const boost::dynamic_bitset<> &bitset);
 
 namespace {
 struct tplSorter
-    : public std::binary_function<MultiFPBReader::ResultTuple,
-                                  MultiFPBReader::ResultTuple, bool> {
+    : public std::function<bool(MultiFPBReader::ResultTuple,
+                                  MultiFPBReader::ResultTuple)> {
   bool operator()(const MultiFPBReader::ResultTuple &v1,
                   const MultiFPBReader::ResultTuple &v2) const {
     if (v1.get<0>() == v2.get<0>()) {
@@ -45,8 +45,8 @@ struct tplSorter
   }
 };
 struct pairSorter
-    : public std::binary_function<std::pair<unsigned int, unsigned int>,
-                                  std::pair<unsigned int, unsigned int>, bool> {
+    : public std::function<bool(std::pair<unsigned int, unsigned int>,
+                                  std::pair<unsigned int, unsigned int>)> {
   bool operator()(const std::pair<unsigned int, unsigned int> &v1,
                   const std::pair<unsigned int, unsigned int> &v2) const {
     if (v1.first == v2.first) {

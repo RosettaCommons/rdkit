@@ -81,7 +81,7 @@ bool chiralAtomNeedsTagInversion(const RDKit::ROMol &mol,
 }
 
 struct _possibleCompare
-    : public std::binary_function<PossibleType, PossibleType, bool> {
+    : public std::function<bool(PossibleType, PossibleType)> {
   bool operator()(const PossibleType &arg1, const PossibleType &arg2) const {
     return (arg1.get<0>() < arg2.get<0>());
   }
