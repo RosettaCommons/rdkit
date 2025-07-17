@@ -11,6 +11,7 @@
 #ifndef RD_TAUTOMER_H
 #define RD_TAUTOMER_H
 
+#include <cstring>
 #include <boost/function.hpp>
 #include <string>
 #include <iterator>
