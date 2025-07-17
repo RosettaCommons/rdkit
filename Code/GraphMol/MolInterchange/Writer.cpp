@@ -281,7 +281,8 @@ void addMol(const T &imol, rj::Value &rjMol, rj::Document &doc,
         rj::Value cipv;
         cipv.SetString(cip.c_str(), cip.size(), doc.GetAllocator());
         rj::Value rjElement(rj::kArrayType);
-        rjElement.PushBack(rj::Value(atom->getIdx()), doc.GetAllocator());
+        rj::Value idx(atom->getIdx());
+        rjElement.PushBack(idx, doc.GetAllocator());
         rjElement.PushBack(cipv, doc.GetAllocator());
         rjArr.PushBack(rjElement, doc.GetAllocator());
       }
