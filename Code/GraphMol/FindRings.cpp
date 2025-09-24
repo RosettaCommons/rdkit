@@ -203,7 +203,7 @@ void findSSSRforDupCands(const ROMol &mol, VECT_INT_VECT &res,
   }      // end of loop over all set of duplicate candidates
 }
 
-struct compRingSize : public std::binary_function<INT_VECT, INT_VECT, bool> {
+struct compRingSize {
   bool operator()(const INT_VECT &v1, const INT_VECT &v2) const {
     return v1.size() < v2.size();
   }
