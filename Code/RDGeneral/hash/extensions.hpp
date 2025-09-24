@@ -66,7 +66,6 @@ namespace gboost
 #if !defined(BOOST_NO_TEMPLATE_PARTIAL_SPECIALIZATION)
 
     template <class T> struct hash
-        : std::unary_function<T, std::hash_result_t>
     {
 #if !defined(BOOST_NO_FUNCTION_TEMPLATE_ORDERING)
         std::hash_result_t operator()(T const& val) const

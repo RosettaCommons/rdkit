@@ -80,8 +80,7 @@ bool chiralAtomNeedsTagInversion(const RDKit::ROMol &mol,
            !isUnsaturated(atom, mol)));
 }
 
-struct _possibleCompare
-    : public std::binary_function<PossibleType, PossibleType, bool> {
+struct _possibleCompare {
   bool operator()(const PossibleType &arg1, const PossibleType &arg2) const {
     return (arg1.get<0>() < arg2.get<0>());
   }
